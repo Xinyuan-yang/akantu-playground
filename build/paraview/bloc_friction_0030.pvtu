@@ -1,0 +1,23 @@
+<VTKFile type="PUnstructuredGrid" version="0.1" 
+byte_order="LittleEndian">
+ <PUnstructuredGrid GhostLevel="0">
+  <PPoints>
+   <PDataArray type="Float64" NumberOfComponents="3" format="binary" />
+  </PPoints>
+  <PPointData>
+   <PDataArray type="Float64" NumberOfComponents="1" Name="areas" format="binary"></PDataArray>
+   <PDataArray type="UInt8" NumberOfComponents="1" Name="blocked_dofs" format="binary"></PDataArray>
+   <PDataArray type="Float64" NumberOfComponents="3" Name="contact_force" format="binary"></PDataArray>
+   <PDataArray type="Float64" NumberOfComponents="3" Name="displacement" format="binary"></PDataArray>
+   <PDataArray type="Float64" NumberOfComponents="3" Name="external_force" format="binary"></PDataArray>
+   <PDataArray type="Float64" NumberOfComponents="3" Name="internal_force" format="binary"></PDataArray>
+   <PDataArray type="Float64" NumberOfComponents="3" Name="normals" format="binary"></PDataArray>
+   <PDataArray type="Float64" NumberOfComponents="3" Name="tangents" format="binary"></PDataArray>
+   <PDataArray type="Float64" NumberOfComponents="3" Name="velocity" format="binary"></PDataArray>
+  </PPointData>
+  <PCellData>
+   <PDataArray type="Float64" NumberOfComponents="4" Name="stress" format="binary"></PDataArray>
+  </PCellData>
+  <Piece Source="bloc_friction-VTU/bloc_friction_0030.vtu" />
+ </PUnstructuredGrid>
+</VTKFile>

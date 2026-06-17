@@ -1,0 +1,31 @@
+
+material elastic [
+    name = upper
+    rho = 7800     # density
+    E   = 2.1e11   # young's modulus
+    nu  = 0.3      # poisson's ratio
+]
+
+material elastic [
+    name = lower
+    rho = 7800     # density
+    E   = 2.1e11   # young's modulus
+    nu  = 0.3      # poisson's ratio
+]
+
+contact_detector [
+  type = explicit		 			
+  master = contact_bottom
+  slave = contact_top
+  projection_tolerance = 1e-10
+  max_iterations = 1000
+  extension_tolerance = 1e-5
+]
+
+contact_resolution penalty_linear [
+  name = contact_top
+  mu = 0.3
+  epsilon_n = 4e13
+  epsilon_t = 1e12
+  is_master_deformable = false
+]
