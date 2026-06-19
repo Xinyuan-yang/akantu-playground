@@ -1,5 +1,5 @@
 // use multiples of 10
-Nb_elems = 200;
+Nb_elems = 100;
 
 // Mesh.Format = 2.2;
 

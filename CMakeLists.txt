@@ -20,3 +20,4 @@ add_mesh(bloc bloc.geo 2 1)
 add_dependencies(bloc_friction bloc)
 
 add_mesh(ntn_test_ras ntn_test_ras.geo 2 1)
+add_dependencies(steady_state ntn_test_ras)
