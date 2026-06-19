@@ -1,0 +1,46 @@
+# CMake build directories and generated files
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+Makefile
+cmake_install.cmake
+compile_commands.json
+
+# Akantu / simulation outputs
+paraview/
+*-VTU/
+*.vtu
+*.pvtu
+*.pvd
+*.csv
+*.dat.restart
+*.restart
+*.log
+
+# Generated meshes
+*.msh
+
+# Local executables and object files
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.a
+*.exe
+bloc_friction
+BM_0
+steady_state
+
+# Python / notebook caches sometimes generated during post-processing
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Editor and OS noise
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/bloc_friction.dir/test.cc.o -o bloc_friction  -Wl,-rpath,/usr/local/lib /usr/local/lib/libakantu.so.5.0.7 /usr/local/lib/libiohelper.so -lm /usr/lib/x86_64-linux-gnu/libdmumps_seq.so -lm /usr/lib/x86_64-linux-gnu/libdmumps_seq.so 
