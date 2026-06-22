@@ -1,6 +1,7 @@
 // Velocity boundary condition code //
 
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <ostream>
@@ -23,9 +24,15 @@ using namespace akantu;
 /* ------------------------------------------------------------------------ */
 /* Main                                                                     */
 /* ------------------------------------------------------------------------ */
-int main(int /*argc*/, char * /*argv*/[]) {
+int main(int argc, char * argv[]) {
 
-  getStaticParser().parse("ras_ss.in");
+  if (argc != 2) {
+    std::cerr << "Usage: " << argv[0] << " <input-file>" << std::endl;
+    return EXIT_FAILURE;
+  }
+
+  const std::string input_file = argv[1];
+  getStaticParser().parse(input_file);
   const ParserSection &data = getUserParser();
   std::string output_folder = data.getParameter("output_folder").getValue();
   if (output_folder.size() >= 2 &&

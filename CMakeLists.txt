@@ -19,6 +19,17 @@ configure_file(
     COPYONLY
 )
 
+set(MU_VALUES 0.10 0.15 0.20 0.30 0.33)
+
+foreach(MU ${MU_VALUES})
+
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/ras_ss_coulomb_${MU}.in
+        ${CMAKE_CURRENT_BINARY_DIR}/ras_ss_coulomb_${MU}.in
+        COPYONLY
+    )
+
+endforeach()
 
 if(NOT COMMAND add_mesh)
   message(FATAL_ERROR "add_mesh was not defined")
