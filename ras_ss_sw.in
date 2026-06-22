@@ -3,13 +3,13 @@ user parameters [
      top_traction  = [ 0.0e+06 , -1e6 ] 
      bot_traction  = [ -0.0e+06 ,  1e6 ] 
      shear_velocity = 2e-3
-     fss = 0.323687421261617
+     fss = 0.3
 
      mesh = "ntn_test_ras.msh"
      spatial_dimension = 2
-     output_folder = "steady_state_coulomb_0.2"
+     output_folder = "test_x"
 
-     nb_it_nodes = 200
+     nb_it_nodes = 100
      noise_file = noise_field_200.dat
      pos_file = pos_field_200.dat
      perturbation_amplitude = 0.2
@@ -20,8 +20,10 @@ user parameters [
      time_step_factor = 0.01
 ]
 
-friction coulomb  [
-     mu = 0.33
+friction linear_slip_weakening [
+     mu_s = 0.5
+     mu_k = 0.3
+     d_c  = 1e-5
 ]
 
 material elastic [

@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <iostream>
 #include <ostream>
+#include <sstream>
 #include <string>
 
 #include "dumpable_iohelper.hh"
@@ -25,14 +26,12 @@ using namespace akantu;
 /* ------------------------------------------------------------------------ */
 int main(int /*argc*/, char * /*argv*/[]) {
 
-  getStaticParser().parse("ras_ss.in");
+  // TODO read this from input file
+  std::stringstream output_folder;
+
+  getStaticParser().parse("ras_ss_sw.in");
   const ParserSection &data = getUserParser();
-  std::string output_folder = data.getParameter("output_folder").getValue();
-  if (output_folder.size() >= 2 &&
-      ((output_folder.front() == '"' && output_folder.back() == '"') ||
-       (output_folder.front() == '\'' && output_folder.back() == '\''))) {
-    output_folder = output_folder.substr(1, output_folder.size() - 2);
-  }
+  output_folder << data.getParameter("output_folder");
   UInt spatial_dimension = data.getParameter("spatial_dimension");
   UInt dump_every = data.getParameter("dump_every");
   std::unique_ptr<Mesh> mesh;
@@ -60,7 +59,7 @@ int main(int /*argc*/, char * /*argv*/[]) {
   Vector<Real> trac_top = data.getParameter("top_traction");
   Vector<Real> trac_bottom = data.getParameter("bot_traction");
 
-  model->setBaseName(output_folder);
+  model->setBaseName(output_folder.str());
   model->addDumpField("blocked_dofs");
   model->addDumpField("mass");
   model->addDumpFieldVector("velocity");
@@ -137,7 +136,7 @@ int main(int /*argc*/, char * /*argv*/[]) {
   model->dump();
 
   std::ofstream energies;
-  auto file_name = std::filesystem::path(output_folder);
+  auto file_name = std::filesystem::path(output_folder.str());
   file_name.replace_extension("csv");
   file_name = std::string("friction-energies-") + file_name.string();
   energies.open(file_name.c_str(), std::ofstream::out | std::ofstream::trunc);
