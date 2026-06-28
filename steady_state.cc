@@ -1,5 +1,5 @@
 // Velocity boundary condition code //
-
+// Takes into parameter the friction coefficient and the number of elements along the contact surface.
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -34,16 +34,13 @@ int main(int argc, char * argv[]) {
   }
 
   const std::string input_file = "ras_ss_coulomb.in";
-  const Real coulomb_mu = std::stod(argv[1]);
+  const std::string coulomb_mu_text = argv[1];
+  const Real coulomb_mu = std::stod(coulomb_mu_text);
   const UInt nb_it_nodes = std::stoul(argv[2]);
   getStaticParser().parse(input_file);
   const ParserSection &data = getUserParser();
-  std::string output_folder = data.getParameter("output_folder").getValue();
-  if (output_folder.size() >= 2 &&
-      ((output_folder.front() == '"' && output_folder.back() == '"') ||
-       (output_folder.front() == '\'' && output_folder.back() == '\''))) {
-    output_folder = output_folder.substr(1, output_folder.size() - 2);
-  }
+  std::string output_folder =
+      "steady_state_mu_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes);
   UInt spatial_dimension = data.getParameter("spatial_dimension");
   UInt dump_every = data.getParameter("dump_every");
   std::unique_ptr<Mesh> mesh;
