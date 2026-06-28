@@ -19,18 +19,11 @@ configure_file(
     COPYONLY
 )
 
-set(MU_VALUES 0.10 0.15 0.20 0.30 0.33)
-
-foreach(MU ${MU_VALUES})
-
-    configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/ras_ss_coulomb_${MU}.in
-        ${CMAKE_CURRENT_BINARY_DIR}/ras_ss_coulomb_${MU}.in
-        COPYONLY
-    )
-
-endforeach()
-
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/ras_ss_coulomb.in
+    ${CMAKE_CURRENT_BINARY_DIR}/ras_ss_coulomb.in
+    COPYONLY
+)
 if(NOT COMMAND add_mesh)
   message(FATAL_ERROR "add_mesh was not defined")
 endif()
@@ -43,6 +36,8 @@ add_akantu_simulation(steady_state_sw steady_state_slipweakening.cc)
 add_mesh(bloc bloc.geo 2 1)
 add_dependencies(bloc_friction bloc)
 
-add_mesh(ntn_test_ras ntn_test_ras.geo 2 1)
-add_dependencies(steady_state ntn_test_ras)
-add_dependencies(steady_state_sw ntn_test_ras)
+add_mesh(ntn_test_100 ntn_test_100.geo 2 1)
+add_mesh(ntn_test_200 ntn_test_200.geo 2 1)
+add_mesh(ntn_test_500 ntn_test_500.geo 2 1)
+add_mesh(ntn_test_1000 ntn_test_1000.geo 2 1)
+

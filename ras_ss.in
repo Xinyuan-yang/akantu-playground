@@ -20,9 +20,18 @@ user parameters [
      time_step_factor = 0.01
 ]
 
-friction coulomb  [
-     mu = 0.33
+friction rate_and_state:revised_dieterich:ageing_regularized  [
+     mu_0     = 0.28
+     a        = 0.005
+     b        = 0.075
+     v_star   = 1e-7
+     phi_star = 0.00033
+     d_c      = 5e-7
+     v0       = 1e-7
+     
+     friction_state = 0.00024999999968750003
 ]
+
 
 material elastic [
      name = slider

@@ -3,6 +3,7 @@
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 build_dir="${script_dir}/build"
+nb_it_nodes="${1:-200}"
 
 if [[ ! -d "${build_dir}" ]]; then
   echo "Build directory not found: ${build_dir}" >&2
@@ -24,11 +25,13 @@ if (( ${#input_files[@]} == 0 )); then
 fi
 
 for input_file in "${input_files[@]}"; do
+  mu="$(basename "${input_file}" .in)"
+  mu="${mu#ras_ss_coulomb_}"
   echo
-  echo "Running $(basename "${input_file}")..."
+  echo "Running $(basename "${input_file}") with mu=${mu}..."
   (
     cd "${build_dir}"
-    ./steady_state "${input_file}"
+    ./steady_state "${mu}" "${nb_it_nodes}"
   )
 done
 

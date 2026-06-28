@@ -12,6 +12,7 @@
 #include "dumper_text.hh"
 #include "dumper_variable.hh"
 #include "solid_mechanics_model.hh"
+#include "sparse_matrix.hh"
 
 #include "aka_common.hh"
 #include "mesh_utils.hh"
@@ -26,12 +27,15 @@ using namespace akantu;
 /* ------------------------------------------------------------------------ */
 int main(int argc, char * argv[]) {
 
-  if (argc != 2) {
-    std::cerr << "Usage: " << argv[0] << " <input-file>" << std::endl;
+  if (argc != 3) {
+    std::cerr << "Usage: " << argv[0]
+              << " <coulomb-mu> <nb-it-nodes>" << std::endl;
     return EXIT_FAILURE;
   }
 
-  const std::string input_file = argv[1];
+  const std::string input_file = "ras_ss_coulomb.in";
+  const Real coulomb_mu = std::stod(argv[1]);
+  const UInt nb_it_nodes = std::stoul(argv[2]);
   getStaticParser().parse(input_file);
   const ParserSection &data = getUserParser();
   std::string output_folder = data.getParameter("output_folder").getValue();
@@ -46,7 +50,9 @@ int main(int argc, char * argv[]) {
   std::unique_ptr<SolidMechanicsModel> model;
   std::unique_ptr<NTNContactSolverCallback> solver_ntn;
   mesh = std::make_unique<Mesh>(spatial_dimension);
-  mesh->read("ntn_test_ras.msh");
+  const std::string mesh_file =
+      "ntn_test_" + std::to_string(nb_it_nodes) + ".msh";
+  mesh->read(mesh_file);
 
   // Periodic BC switch here
   // mesh->makePeriodic(_x, "slider_left", "slider_right");
@@ -77,7 +83,7 @@ int main(int argc, char * argv[]) {
   model->addDumpFieldVector("external_force");
 
   // Static analytical solution
-  Real fss = data.getParameter("fss");
+  Real fss = coulomb_mu;
   Real E = mat.getParam("E");
   Real nu = mat.getParam("nu");
   Real shear_modulus = E / (2. * (1. + nu));
@@ -108,6 +114,7 @@ int main(int argc, char * argv[]) {
   auto &velo = model->getVelocity();
   auto &increment = model->getIncrement();
   auto friction = solver_ntn->getFriction();
+  friction->set("mu", coulomb_mu);
   auto dt = model->getTimeStep();
 
   for (auto n : slider_nodes) {
@@ -141,7 +148,20 @@ int main(int argc, char * argv[]) {
   model->setTimeStep(time_step);
   UInt nb_steps = data.getParameter("nb_steps");
 
-  model->dump();
+  Real alpha = 0; // mass proportional damping
+  Real beta = 0;  // stiffness proportional damping
+
+  model->assembleMass();
+  auto &M = model->getDOFManager().getMatrix("M");
+
+  model->assembleStiffnessMatrix(true);
+  auto &K = model->getDOFManager().getMatrix("K");
+
+  auto &C = model->getDOFManager().getNewMatrix("C", "K");
+  C.zero();
+  C.add(M, alpha);
+  C.add(K, beta);
+  std::cout << "has C = " << model->getDOFManager().hasMatrix("C") << std::endl;
 
   std::ofstream energies;
   auto file_name = std::filesystem::path(output_folder);
@@ -189,7 +209,6 @@ int main(int argc, char * argv[]) {
       }
     }
 
-    model->solveStep(*solver_ntn, "explicit_lumped");
 
     auto ekin = model->getEnergy("kinetic");
     auto epot = model->getEnergy("potential");
@@ -206,6 +225,7 @@ int main(int argc, char * argv[]) {
       model->dump();
       std::cout << "Step " << s << "\t\r" << std::flush;
     }
+
 
     if (s == 10) {
       Real left = lowerBounds(0);
