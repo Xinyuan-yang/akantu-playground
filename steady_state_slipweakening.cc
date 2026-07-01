@@ -28,10 +28,10 @@ int main(int /*argc*/, char * /*argv*/[]) {
 
   // TODO read this from input file
   std::stringstream output_folder;
+  output_folder << "output_folder";
 
   getStaticParser().parse("ras_ss_sw.in");
   const ParserSection &data = getUserParser();
-  output_folder << data.getParameter("output_folder");
   UInt spatial_dimension = data.getParameter("spatial_dimension");
   UInt dump_every = data.getParameter("dump_every");
   std::unique_ptr<Mesh> mesh;
