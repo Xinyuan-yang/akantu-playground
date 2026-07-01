@@ -24,6 +24,12 @@ configure_file(
     ${CMAKE_CURRENT_BINARY_DIR}/ras_ss_coulomb.in
     COPYONLY
 )
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/ras_ss_coulomb_ve.in
+    ${CMAKE_CURRENT_BINARY_DIR}/ras_ss_coulomb_ve.in
+    COPYONLY
+)
 if(NOT COMMAND add_mesh)
   message(FATAL_ERROR "add_mesh was not defined")
 endif()
@@ -40,4 +46,6 @@ add_mesh(ntn_test_100 ntn_test_100.geo 2 1)
 add_mesh(ntn_test_200 ntn_test_200.geo 2 1)
 add_mesh(ntn_test_500 ntn_test_500.geo 2 1)
 add_mesh(ntn_test_1000 ntn_test_1000.geo 2 1)
+add_dependencies(steady_state ntn_test_100 ntn_test_200 ntn_test_500 ntn_test_1000)
 
+add_akantu_simulation(steady_state_Method1 steady_state_Method1.cc)
