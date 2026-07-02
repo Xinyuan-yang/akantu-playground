@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
   getStaticParser().parse(input_file);
   const ParserSection &data = getUserParser();
   std::string output_folder =
-      "steady_state_mu_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes);
+      "steady_state_M2_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
   UInt spatial_dimension = data.getParameter("spatial_dimension");
   std::unique_ptr<Mesh> mesh;
   std::unique_ptr<SolidMechanicsModel> model;

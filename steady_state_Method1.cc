@@ -40,9 +40,8 @@ int main(int argc, char * argv[]) {
   getStaticParser().parse(input_file);
   const ParserSection &data = getUserParser();
   std::string output_folder =
-      "steady_state_mu_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes);
+      "steady_state_M1_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
   UInt spatial_dimension = data.getParameter("spatial_dimension");
-  UInt dump_every = data.getParameter("dump_every");
   std::unique_ptr<Mesh> mesh;
   std::unique_ptr<SolidMechanicsModel> model;
   std::unique_ptr<NTNContactSolverCallback> solver_ntn;
@@ -85,6 +84,12 @@ int main(int argc, char * argv[]) {
     std::cout << "Viscoelastic Eta multiplier = 1" << std::endl;
   }
 
+  Real cp = mat.getPushWaveSpeed(ElementNull);
+  Real cs = mat.getShearWaveSpeed(ElementNull);
+
+  std::cout << "P-wave speed = " << cp << std::endl;
+  std::cout << "S-wave speed = " << cs << std::endl;
+
   Real shear_vel = data.getParameter("shear_velocity");
   Vector<Real> trac_top = data.getParameter("top_traction");
   Vector<Real> trac_bottom = data.getParameter("bot_traction");
@@ -108,7 +113,8 @@ int main(int argc, char * argv[]) {
   Array<Real> &displacement = model->getDisplacement();
   Array<Real> &position = mesh->getNodes();
   UInt nb_nodes = model->getFEEngine().getMesh().getNbNodes();
-
+  
+  Real t_fin = 0.5 / cs;
 
   // Steady state initialization
   for (UInt n = 0; n < nb_nodes; ++n) {
@@ -161,7 +167,12 @@ int main(int argc, char * argv[]) {
   Real stable_time_step = model->getStableTimeStep();
   Real time_step = stable_time_step * time_step_factor;
   model->setTimeStep(time_step);
-  UInt nb_steps = data.getParameter("nb_steps");
+  UInt nb_steps = t_fin / time_step;
+  UInt dump_every = nb_steps / 200;
+
+  std::cout << "Time step = " << time_step << std::endl;
+  std::cout << "Number of steps = " << nb_steps << std::endl;
+  std::cout << "Dump every = " << dump_every << std::endl;
 
   Real alpha = 0; // mass proportional damping
 
