@@ -49,3 +49,4 @@ __pycache__/
 log/
 *.out
 *.err
+Check_consistency.ipynb

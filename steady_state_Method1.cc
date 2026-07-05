@@ -136,6 +136,7 @@ int main(int argc, char * argv[]) {
   auto &velo = model->getVelocity();
   auto &increment = model->getIncrement();
   auto friction = solver_ntn->getFriction();
+  friction->set("mu", coulomb_mu);
   auto dt = model->getTimeStep();
 
   for (auto n : slider_nodes) {
