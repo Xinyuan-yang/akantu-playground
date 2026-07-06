@@ -40,8 +40,11 @@ int main(int argc, char *argv[])
   const Real coulomb_mu = std::stod(coulomb_mu_text);
   const UInt nb_it_nodes = std::stoul(argv[2]);
   const std::string damping_mode = argv[3];
-  getStaticParser().parse(input_file);
+  initialize(input_file, argc, argv);
   const ParserSection &data = getUserParser();
+
+  const auto &comm = Communicator::getStaticCommunicator();
+  auto prank = comm.whoAmI();
   std::string output_folder =
       "steady_state_M2_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
   UInt spatial_dimension = data.getParameter("spatial_dimension");
@@ -51,7 +54,12 @@ int main(int argc, char *argv[])
   mesh = std::make_unique<Mesh>(spatial_dimension);
   const std::string mesh_file =
       "ntn_test_" + std::to_string(nb_it_nodes) + ".msh";
-  mesh->read(mesh_file);
+  if (prank == 0)
+  {
+    mesh->read(mesh_file);
+  }
+
+  mesh->distribute();
 
   // Periodic BC switch here
   // mesh->makePeriodic(_x, "slider_left", "slider_right");
