@@ -204,9 +204,7 @@ int main(int argc, char *argv[])
   std::cout << "has C = " << model->getDOFManager().hasMatrix("C") << std::endl;
 
   std::ofstream energies;
-  auto file_name = std::filesystem::path(output_folder);
-  file_name.replace_extension("csv");
-  file_name = std::string("friction-energies-") + file_name.string();
+  auto file_name = std::filesystem::path("friction-energies-" + output_folder + ".csv");
   energies.open(file_name.c_str(), std::ofstream::out | std::ofstream::trunc);
 
   energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;

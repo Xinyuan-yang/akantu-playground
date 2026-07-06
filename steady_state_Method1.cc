@@ -24,9 +24,11 @@ using namespace akantu;
 /* ------------------------------------------------------------------------ */
 /* Main                                                                     */
 /* ------------------------------------------------------------------------ */
-int main(int argc, char * argv[]) {
+int main(int argc, char *argv[])
+{
 
-  if (argc != 4) {
+  if (argc != 4)
+  {
     std::cerr << "Usage: " << argv[0]
               << " <coulomb-mu> <nb-it-nodes> <damping: n|s|l>" << std::endl;
     return EXIT_FAILURE;
@@ -50,7 +52,6 @@ int main(int argc, char * argv[]) {
       "ntn_test_" + std::to_string(nb_it_nodes) + ".msh";
   mesh->read(mesh_file);
 
-
   // Periodic BC switch here
   // mesh->makePeriodic(_x, "slider_left", "slider_right");
   // mesh->makePeriodic(_x, "base_left", "base_right");
@@ -67,12 +68,15 @@ int main(int argc, char * argv[]) {
   auto &mat = model->getMaterial("slider");
   auto &base_mat = model->getMaterial("base");
 
-  if (damping_mode == "n") {
+  if (damping_mode == "n")
+  {
     mat.set("Eta", 0.);
     base_mat.set("Eta", 0.);
     std::cout << "Viscoelastic Eta multiplier = 0: slider Eta = 0, base Eta = 0"
               << std::endl;
-  } else if (damping_mode == "l") {
+  }
+  else if (damping_mode == "l")
+  {
     Real slider_eta = mat.getParam("Eta");
     Real base_eta = base_mat.getParam("Eta");
     mat.set("Eta", 50. * slider_eta);
@@ -80,7 +84,9 @@ int main(int argc, char * argv[]) {
     std::cout << "Viscoelastic Eta multiplier = 50: slider Eta = "
               << 50. * slider_eta << ", base Eta = " << 50. * base_eta
               << std::endl;
-  } else {
+  }
+  else
+  {
     std::cout << "Viscoelastic Eta multiplier = 1" << std::endl;
   }
 
@@ -113,11 +119,12 @@ int main(int argc, char * argv[]) {
   Array<Real> &displacement = model->getDisplacement();
   Array<Real> &position = mesh->getNodes();
   UInt nb_nodes = model->getFEEngine().getMesh().getNbNodes();
-  
+
   Real t_fin = 0.5 / cs;
 
   // Steady state initialization
-  for (UInt n = 0; n < nb_nodes; ++n) {
+  for (UInt n = 0; n < nb_nodes; ++n)
+  {
     displacement(n, 0) = fss * -trac_top(1) / (shear_modulus)*position(n, 1);
     displacement(n, 1) = normal_strain_applied * position(n, 1);
   }
@@ -139,11 +146,13 @@ int main(int argc, char * argv[]) {
   friction->set("mu", coulomb_mu);
   auto dt = model->getTimeStep();
 
-  for (auto n : slider_nodes) {
+  for (auto n : slider_nodes)
+  {
     velo(n, _x) = 0.5 * shear_vel;
     increment(n, _x) = 0.5 * shear_vel * dt;
   }
-  for (auto n : base_nodes) {
+  for (auto n : base_nodes)
+  {
     velo(n, _x) = -0.5 * shear_vel;
     increment(n, _x) = -0.5 * shear_vel * dt;
   }
@@ -158,9 +167,10 @@ int main(int argc, char * argv[]) {
   for (auto &&[n, master, slave, slip_vel, slip_vel_n, is_sticking] :
        enumerate(contact->getMasters(), contact->getSlaves(),
                  make_view(slip_velocity, slip_velocity.getNbComponent()),
-                 slip_velocity_norm, is_sticking)) {
+                 slip_velocity_norm, is_sticking))
+  {
     is_sticking = false;
-    //friction->updateFrictionState(n, phi);
+    // friction->updateFrictionState(n, phi);
   }
   //////
 
@@ -177,13 +187,20 @@ int main(int argc, char * argv[]) {
 
   Real alpha = 0; // mass proportional damping
 
-  if (damping_mode == "n") {
+  if (damping_mode == "n")
+  {
     alpha = 0;
-  } else if (damping_mode == "s") {
+  }
+  else if (damping_mode == "s")
+  {
     alpha = 40;
-  } else if (damping_mode == "l") {
+  }
+  else if (damping_mode == "l")
+  {
     alpha = 40;
-  } else {
+  }
+  else
+  {
     std::cerr << "Unknown damping mode '" << damping_mode
               << "'. Use n, s, or l." << std::endl;
     return EXIT_FAILURE;
@@ -203,9 +220,7 @@ int main(int argc, char * argv[]) {
   model->dump();
 
   std::ofstream energies;
-  auto file_name = std::filesystem::path(output_folder);
-  file_name.replace_extension("csv");
-  file_name = std::string("friction-energies-") + file_name.string();
+  auto file_name = std::filesystem::path("friction-energies-" + output_folder + ".csv");
   energies.open(file_name.c_str(), std::ofstream::out | std::ofstream::trunc);
 
   energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
@@ -214,7 +229,8 @@ int main(int argc, char * argv[]) {
 
   std::cout << "Starting simulation..." << std::endl;
 
-  for (UInt s = 0; s < nb_steps; ++s) {
+  for (UInt s = 0; s < nb_steps; ++s)
+  {
     // Apply velocity
     UInt nb_nodes = model->getFEEngine().getMesh().getNbNodes();
     Array<Real> &position = mesh->getNodes();
@@ -228,21 +244,27 @@ int main(int argc, char * argv[]) {
     Real disp_incr = shear_vel * time_step;
     Array<Real> &displacement = model->getDisplacement();
     Array<bool> &blocked = model->getBlockedDOFs();
-    for (UInt n = 0; n < nb_nodes; ++n) {
-      if (std::abs(position(n, 1) - top) < 1e-6) {
+    for (UInt n = 0; n < nb_nodes; ++n)
+    {
+      if (std::abs(position(n, 1) - top) < 1e-6)
+      {
         velo(n, _x) = 0.5 * shear_vel;
       }
-      if (std::abs(position(n, 1) - bottom) < 1e-6) {
+      if (std::abs(position(n, 1) - bottom) < 1e-6)
+      {
         velo(n, _x) = -0.5 * shear_vel;
       }
     }
 
-    for (UInt n = 0; n < nb_nodes; ++n) {
-      if (std::abs(position(n, 1) - top) < 1e-6) {
+    for (UInt n = 0; n < nb_nodes; ++n)
+    {
+      if (std::abs(position(n, 1) - top) < 1e-6)
+      {
         displacement(n, 0) += 0.5 * disp_incr;
         blocked(n, 0) = true;
       }
-      if (std::abs(position(n, 1) - bottom) < 1e-6) {
+      if (std::abs(position(n, 1) - bottom) < 1e-6)
+      {
         displacement(n, 0) += -0.5 * disp_incr;
         blocked(n, 0) = true;
       }
@@ -254,14 +276,16 @@ int main(int argc, char * argv[]) {
     auto epot = model->getEnergy("potential");
     auto work = model->getEnergy("external work new");
     auto econ = solver_ntn->getExternalWork();
-    if (s == 0) {
+    if (s == 0)
+    {
       einit = ekin + epot - (work + econ[0] + econ[1]);
     }
     energies << s * time_step << "," << ekin << "," << epot << "," << work
              << "," << econ[0] << "," << econ[1] << ","
              << ekin + epot - (work + econ[0] + econ[1]) - einit << std::endl;
 
-    if (s % dump_every == 0) {
+    if (s % dump_every == 0)
+    {
       model->dump();
       std::cout << "Step " << s << "\t\r" << std::flush;
     }

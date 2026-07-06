@@ -17,13 +17,10 @@ user parameters [
      # TIME
      nb_steps  = 1000
      dump_every = 10
-     time_step_factor = 0.01
+     time_step_factor = 0.1
 ]
 
 friction linear_slip_weakening [
-     mu_s = 0.5
-     mu_k = 0.3
-     d_c  = 1e-5
 ]
 
 material elastic [

@@ -1,10 +1,10 @@
 // Velocity boundary condition code //
-
+// Takes into parameter the friction coefficient and the number of elements along the contact surface.
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <ostream>
-#include <sstream>
 #include <string>
 
 #include "dumpable_iohelper.hh"
@@ -12,6 +12,7 @@
 #include "dumper_text.hh"
 #include "dumper_variable.hh"
 #include "solid_mechanics_model.hh"
+#include "sparse_matrix.hh"
 
 #include "aka_common.hh"
 #include "mesh_utils.hh"
@@ -24,21 +25,43 @@ using namespace akantu;
 /* ------------------------------------------------------------------------ */
 /* Main                                                                     */
 /* ------------------------------------------------------------------------ */
-int main(int /*argc*/, char * /*argv*/[]) {
+int main(int argc, char *argv[])
+{
 
-  // TODO read this from input file
-  std::stringstream output_folder;
-  output_folder << "output_folder";
+  if (argc != 4)
+  {
+    std::cerr << "Usage: " << argv[0]
+              << " <coulomb-mus> <nb-it-nodes> <damping: n|s|l>" << std::endl;
+    return EXIT_FAILURE;
+  }
 
-  getStaticParser().parse("ras_ss_sw.in");
+  const std::string input_file = "ras_ss_sw.in";
+  const std::string coulomb_mu_text = argv[1];
+  const Real coulomb_mus = std::stod(coulomb_mu_text);
+  const UInt nb_it_nodes = std::stoul(argv[2]);
+  const std::string damping_mode = argv[3];
+  initialize(input_file, argc, argv);
   const ParserSection &data = getUserParser();
+
+  const auto &comm = Communicator::getStaticCommunicator();
+  auto prank = comm.whoAmI();
+
+  std::string output_folder =
+      "steady_state_SW_M2_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
   UInt spatial_dimension = data.getParameter("spatial_dimension");
-  UInt dump_every = data.getParameter("dump_every");
   std::unique_ptr<Mesh> mesh;
   std::unique_ptr<SolidMechanicsModel> model;
   std::unique_ptr<NTNContactSolverCallback> solver_ntn;
   mesh = std::make_unique<Mesh>(spatial_dimension);
-  mesh->read("ntn_test_ras.msh");
+  const std::string mesh_file =
+      "ntn_test_" + std::to_string(nb_it_nodes) + ".msh";
+
+  if (prank == 0)
+  {
+    mesh->read(mesh_file);
+  }
+
+  mesh->distribute();
 
   // Periodic BC switch here
   // mesh->makePeriodic(_x, "slider_left", "slider_right");
@@ -55,11 +78,17 @@ int main(int /*argc*/, char * /*argv*/[]) {
 
   const auto &mat = model->getMaterial("slider");
 
+  Real cp = mat.getPushWaveSpeed(ElementNull);
+  Real cs = mat.getShearWaveSpeed(ElementNull);
+
+  std::cout << "P-wave speed = " << cp << std::endl;
+  std::cout << "S-wave speed = " << cs << std::endl;
+
   Real shear_vel = data.getParameter("shear_velocity");
   Vector<Real> trac_top = data.getParameter("top_traction");
   Vector<Real> trac_bottom = data.getParameter("bot_traction");
 
-  model->setBaseName(output_folder.str());
+  model->setBaseName(output_folder);
   model->addDumpField("blocked_dofs");
   model->addDumpField("mass");
   model->addDumpFieldVector("velocity");
@@ -69,7 +98,7 @@ int main(int /*argc*/, char * /*argv*/[]) {
   model->addDumpFieldVector("external_force");
 
   // Static analytical solution
-  Real fss = data.getParameter("fss");
+  Real fss = 0.10; // set residual friction to 0.10 for steady state slip weakening
   Real E = mat.getParam("E");
   Real nu = mat.getParam("nu");
   Real shear_modulus = E / (2. * (1. + nu));
@@ -79,9 +108,11 @@ int main(int /*argc*/, char * /*argv*/[]) {
   Array<Real> &position = mesh->getNodes();
   UInt nb_nodes = model->getFEEngine().getMesh().getNbNodes();
 
+  Real t_fin = 0.5 / cs;
 
   // Steady state initialization
-  for (UInt n = 0; n < nb_nodes; ++n) {
+  for (UInt n = 0; n < nb_nodes; ++n)
+  {
     displacement(n, 0) = fss * -trac_top(1) / (shear_modulus)*position(n, 1);
     displacement(n, 1) = normal_strain_applied * position(n, 1);
   }
@@ -100,13 +131,16 @@ int main(int /*argc*/, char * /*argv*/[]) {
   auto &velo = model->getVelocity();
   auto &increment = model->getIncrement();
   auto friction = solver_ntn->getFriction();
+  friction->set("mu", coulomb_mus);
   auto dt = model->getTimeStep();
 
-  for (auto n : slider_nodes) {
+  for (auto n : slider_nodes)
+  {
     velo(n, _x) = 0.5 * shear_vel;
     increment(n, _x) = 0.5 * shear_vel * dt;
   }
-  for (auto n : base_nodes) {
+  for (auto n : base_nodes)
+  {
     velo(n, _x) = -0.5 * shear_vel;
     increment(n, _x) = -0.5 * shear_vel * dt;
   }
@@ -121,9 +155,10 @@ int main(int /*argc*/, char * /*argv*/[]) {
   for (auto &&[n, master, slave, slip_vel, slip_vel_n, is_sticking] :
        enumerate(contact->getMasters(), contact->getSlaves(),
                  make_view(slip_velocity, slip_velocity.getNbComponent()),
-                 slip_velocity_norm, is_sticking)) {
+                 slip_velocity_norm, is_sticking))
+  {
     is_sticking = false;
-    //friction->updateFrictionState(n, phi);
+    // friction->updateFrictionState(n, phi);
   }
   //////
 
@@ -131,14 +166,55 @@ int main(int /*argc*/, char * /*argv*/[]) {
   Real stable_time_step = model->getStableTimeStep();
   Real time_step = stable_time_step * time_step_factor;
   model->setTimeStep(time_step);
-  UInt nb_steps = data.getParameter("nb_steps");
+  UInt nb_steps = t_fin / time_step;
+  UInt dump_every = nb_steps / 200;
 
-  model->dump();
+  std::cout << "Time step = " << time_step << std::endl;
+  std::cout << "Number of steps = " << nb_steps << std::endl;
+  std::cout << "Dump every = " << dump_every << std::endl;
+
+  Real alpha = 0; // mass proportional damping
+  Real beta = 0;  // stiffness proportional damping
+
+  if (damping_mode == "n")
+  {
+    alpha = 0;
+    beta = 0;
+  }
+  else if (damping_mode == "s")
+  {
+    alpha = 40;
+    beta = 1e-10;
+  }
+  else if (damping_mode == "l")
+  {
+    alpha = 40;
+    beta = 5e-9;
+  }
+  else
+  {
+    std::cerr << "Unknown damping mode '" << damping_mode
+              << "'. Use n, s, or l." << std::endl;
+    return EXIT_FAILURE;
+  }
+
+  std::cout << "Damping mode " << damping_mode << ": alpha = " << alpha
+            << ", beta = " << beta << std::endl;
+
+  model->assembleMass();
+  auto &M = model->getDOFManager().getMatrix("M");
+
+  model->assembleStiffnessMatrix(true);
+  auto &K = model->getDOFManager().getMatrix("K");
+
+  auto &C = model->getDOFManager().getNewMatrix("C", "K");
+  C.zero();
+  C.add(M, alpha);
+  C.add(K, beta);
+  std::cout << "has C = " << model->getDOFManager().hasMatrix("C") << std::endl;
 
   std::ofstream energies;
-  auto file_name = std::filesystem::path(output_folder.str());
-  file_name.replace_extension("csv");
-  file_name = std::string("friction-energies-") + file_name.string();
+  auto file_name = std::filesystem::path("friction-energies-" + output_folder + ".csv");
   energies.open(file_name.c_str(), std::ofstream::out | std::ofstream::trunc);
 
   energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
@@ -147,7 +223,8 @@ int main(int /*argc*/, char * /*argv*/[]) {
 
   std::cout << "Starting simulation..." << std::endl;
 
-  for (UInt s = 0; s < nb_steps; ++s) {
+  for (UInt s = 0; s < nb_steps; ++s)
+  {
     // Apply velocity
     UInt nb_nodes = model->getFEEngine().getMesh().getNbNodes();
     Array<Real> &position = mesh->getNodes();
@@ -161,21 +238,27 @@ int main(int /*argc*/, char * /*argv*/[]) {
     Real disp_incr = shear_vel * time_step;
     Array<Real> &displacement = model->getDisplacement();
     Array<bool> &blocked = model->getBlockedDOFs();
-    for (UInt n = 0; n < nb_nodes; ++n) {
-      if (std::abs(position(n, 1) - top) < 1e-6) {
+    for (UInt n = 0; n < nb_nodes; ++n)
+    {
+      if (std::abs(position(n, 1) - top) < 1e-6)
+      {
         velo(n, _x) = 0.5 * shear_vel;
       }
-      if (std::abs(position(n, 1) - bottom) < 1e-6) {
+      if (std::abs(position(n, 1) - bottom) < 1e-6)
+      {
         velo(n, _x) = -0.5 * shear_vel;
       }
     }
 
-    for (UInt n = 0; n < nb_nodes; ++n) {
-      if (std::abs(position(n, 1) - top) < 1e-6) {
+    for (UInt n = 0; n < nb_nodes; ++n)
+    {
+      if (std::abs(position(n, 1) - top) < 1e-6)
+      {
         displacement(n, 0) += 0.5 * disp_incr;
         blocked(n, 0) = true;
       }
-      if (std::abs(position(n, 1) - bottom) < 1e-6) {
+      if (std::abs(position(n, 1) - bottom) < 1e-6)
+      {
         displacement(n, 0) += -0.5 * disp_incr;
         blocked(n, 0) = true;
       }
@@ -187,35 +270,18 @@ int main(int /*argc*/, char * /*argv*/[]) {
     auto epot = model->getEnergy("potential");
     auto work = model->getEnergy("external work new");
     auto econ = solver_ntn->getExternalWork();
-    if (s == 0) {
+    if (s == 0)
+    {
       einit = ekin + epot - (work + econ[0] + econ[1]);
     }
     energies << s * time_step << "," << ekin << "," << epot << "," << work
              << "," << econ[0] << "," << econ[1] << ","
              << ekin + epot - (work + econ[0] + econ[1]) - einit << std::endl;
 
-    if (s % dump_every == 0) {
+    if (s % dump_every == 0)
+    {
       model->dump();
       std::cout << "Step " << s << "\t\r" << std::flush;
-    }
-
-    if (s == 10) {
-      Real left = lowerBounds(0);
-      Real right = upperBounds(0);
-      Real contact_l = right - left;
-      Real value;
-      Real amplitude = 0.01;
-      auto &cur_pos = contact->getModel().getCurrentPosition();
-      auto &slaves = contact->getSlaves();
-
-      auto &friction_state = friction->getState();
-      UInt nb_contact_nodes = contact->getNbContactNodes();
-      for (UInt n = 0; n < nb_contact_nodes; ++n) {
-        UInt slave = slaves(n);
-        value = friction_state(n) *
-                (1 + amplitude * sin(2 * M_PI / contact_l * cur_pos(slave)));
-        friction->updateFrictionState(n, value);
-      }
     }
   }
   std::cout << "Simulation done." << std::endl;
