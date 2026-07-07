@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <limits>
+#include <memory>
 #include <ostream>
 #include <string>
 
@@ -15,6 +17,7 @@
 #include "sparse_matrix.hh"
 
 #include "aka_common.hh"
+#include "mesh_partition_mesh_data.hh"
 #include "mesh_utils.hh"
 #include "ntn_base_contact.hh"
 #include "ntn_contact_solvercallback.hh"
@@ -59,7 +62,63 @@ int main(int argc, char *argv[])
     mesh->read(mesh_file);
   }
 
-  mesh->distribute();
+  std::shared_ptr<MeshPartition> partition;
+  const Int psize = comm.getNbProc();
+
+  if (psize > 1 && prank == 0)
+  {
+    auto partition_mapping =
+        std::make_shared<ElementTypeMapArray<Idx>>("x_strip_partition");
+
+    Real xmin = std::numeric_limits<Real>::max();
+    Real xmax = -std::numeric_limits<Real>::max();
+
+    for (const auto &type :
+         mesh->elementTypes(spatial_dimension, _not_ghost, _ek_not_defined))
+    {
+      const auto nb_element = mesh->getNbElement(type);
+      for (Idx e = 0; e < nb_element; ++e)
+      {
+        const Element element{type, e, _not_ghost};
+        const auto barycenter = mesh->getBarycenter(element);
+        xmin = std::min(xmin, barycenter(_x));
+        xmax = std::max(xmax, barycenter(_x));
+      }
+    }
+
+    const Real length = xmax - xmin;
+
+    for (const auto &type :
+         mesh->elementTypes(spatial_dimension, _not_ghost, _ek_not_defined))
+    {
+      const auto nb_element = mesh->getNbElement(type);
+      auto &type_partition =
+          partition_mapping->alloc(nb_element, 1, type, _not_ghost);
+
+      for (Idx e = 0; e < nb_element; ++e)
+      {
+        const Element element{type, e, _not_ghost};
+        const auto barycenter = mesh->getBarycenter(element);
+        Int proc = 0;
+
+        if (length > 0.)
+        {
+          const Real x_rel = (barycenter(_x) - xmin) / length;
+          proc = std::min<Int>(psize - 1, std::floor(x_rel * psize));
+        }
+
+        type_partition(e) = proc;
+      }
+    }
+
+    auto mesh_data_partition =
+        std::make_shared<MeshPartitionMeshData>(*mesh, spatial_dimension);
+    mesh_data_partition->setPartitionMapping(partition_mapping);
+    mesh_data_partition->partitionate(psize);
+    partition = mesh_data_partition;
+  }
+
+  mesh->distribute(partition);
 
   // Periodic BC switch here
   // mesh->makePeriodic(_x, "slider_left", "slider_right");
@@ -73,6 +132,7 @@ int main(int argc, char *argv[])
 
   solver_ntn = std::make_unique<NTNContactSolverCallback>(
       *model, "slider_bottom", "base_top", normal_dir, time_step_factor);
+  solver_ntn->getContact()->initParallel();
 
   const auto &mat = model->getMaterial("slider");
 
@@ -105,7 +165,7 @@ int main(int argc, char *argv[])
   Array<Real> &displacement = model->getDisplacement();
   Array<Real> &position = mesh->getNodes();
   UInt nb_nodes = model->getFEEngine().getMesh().getNbNodes();
-  
+
   Real t_fin = 0.5 / cs;
 
   // Steady state initialization
@@ -144,6 +204,11 @@ int main(int argc, char *argv[])
   }
 
   auto contact = solver_ntn->getContact();
+
+  std::cout << "rank " << prank
+            << " contact nodes = "
+            << solver_ntn->getContact()->getNbContactNodes()
+            << std::endl;
 
   auto &slip_velocity = friction->getSlipVelocity();
   auto &slip_velocity_norm = friction->getSlipVelocityNorm();
@@ -212,10 +277,13 @@ int main(int argc, char *argv[])
   std::cout << "has C = " << model->getDOFManager().hasMatrix("C") << std::endl;
 
   std::ofstream energies;
-  auto file_name = std::filesystem::path("friction-energies-" + output_folder + ".csv");
-  energies.open(file_name.c_str(), std::ofstream::out | std::ofstream::trunc);
-
-  energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
+  if (prank == 0)
+  {
+    auto file_name =
+        std::filesystem::path("friction-energies-" + output_folder + ".csv");
+    energies.open(file_name.c_str(), std::ofstream::out | std::ofstream::trunc);
+    energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
+  }
 
   auto einit = 0.;
 
@@ -272,10 +340,13 @@ int main(int argc, char *argv[])
     {
       einit = ekin + epot - (work + econ[0] + econ[1]);
     }
-    energies << s * time_step << "," << ekin << "," << epot << "," << work
-             << "," << econ[0] << "," << econ[1] << ","
-             << ekin + epot - (work + econ[0] + econ[1]) - einit << std::endl;
-
+    if (prank == 0)
+    {
+      energies << s * time_step << "," << ekin << "," << epot << "," << work
+               << "," << econ[0] << "," << econ[1] << ","
+               << ekin + epot - (work + econ[0] + econ[1]) - einit
+               << std::endl;
+    }
     if (s % dump_every == 0)
     {
       model->dump();

@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <limits>
+#include <memory>
 #include <ostream>
 #include <string>
 
@@ -15,6 +17,7 @@
 #include "sparse_matrix.hh"
 
 #include "aka_common.hh"
+#include "mesh_partition_mesh_data.hh"
 #include "mesh_utils.hh"
 #include "ntn_base_contact.hh"
 #include "ntn_contact_solvercallback.hh"
@@ -61,7 +64,63 @@ int main(int argc, char *argv[])
     mesh->read(mesh_file);
   }
 
-  mesh->distribute();
+  std::shared_ptr<MeshPartition> partition;
+  const Int psize = comm.getNbProc();
+
+  if (psize > 1 && prank == 0)
+  {
+    auto partition_mapping =
+        std::make_shared<ElementTypeMapArray<Idx>>("x_strip_partition");
+
+    Real xmin = std::numeric_limits<Real>::max();
+    Real xmax = -std::numeric_limits<Real>::max();
+
+    for (const auto &type :
+         mesh->elementTypes(spatial_dimension, _not_ghost, _ek_not_defined))
+    {
+      const auto nb_element = mesh->getNbElement(type);
+      for (Idx e = 0; e < nb_element; ++e)
+      {
+        const Element element{type, e, _not_ghost};
+        const auto barycenter = mesh->getBarycenter(element);
+        xmin = std::min(xmin, barycenter(_x));
+        xmax = std::max(xmax, barycenter(_x));
+      }
+    }
+
+    const Real length = xmax - xmin;
+
+    for (const auto &type :
+         mesh->elementTypes(spatial_dimension, _not_ghost, _ek_not_defined))
+    {
+      const auto nb_element = mesh->getNbElement(type);
+      auto &type_partition =
+          partition_mapping->alloc(nb_element, 1, type, _not_ghost);
+
+      for (Idx e = 0; e < nb_element; ++e)
+      {
+        const Element element{type, e, _not_ghost};
+        const auto barycenter = mesh->getBarycenter(element);
+        Int proc = 0;
+
+        if (length > 0.)
+        {
+          const Real x_rel = (barycenter(_x) - xmin) / length;
+          proc = std::min<Int>(psize - 1, std::floor(x_rel * psize));
+        }
+
+        type_partition(e) = proc;
+      }
+    }
+
+    auto mesh_data_partition =
+        std::make_shared<MeshPartitionMeshData>(*mesh, spatial_dimension);
+    mesh_data_partition->setPartitionMapping(partition_mapping);
+    mesh_data_partition->partitionate(psize);
+    partition = mesh_data_partition;
+  }
+
+  mesh->distribute(partition);
 
   // Periodic BC switch here
   // mesh->makePeriodic(_x, "slider_left", "slider_right");
@@ -131,7 +190,14 @@ int main(int argc, char *argv[])
   auto &velo = model->getVelocity();
   auto &increment = model->getIncrement();
   auto friction = solver_ntn->getFriction();
-  friction->set("mu", coulomb_mus);
+
+  const Real mu_s = coulomb_mus; // keep static friction from argv[1]
+  const Real mu_d = 0.1;
+  const Real d_c = 5e-3;
+
+  friction->set("mu_s", mu_s);
+  friction->set("mu_k", mu_d);
+  friction->set("d_c", d_c);
   auto dt = model->getTimeStep();
 
   for (auto n : slider_nodes)

@@ -53,7 +53,6 @@ int main(int argc, char *argv[])
   mesh = std::make_unique<Mesh>(spatial_dimension);
   const std::string mesh_file =
       "ntn_test_" + std::to_string(nb_it_nodes) + ".msh";
-  mesh->read(mesh_file);
 
   if (prank == 0)
   {
@@ -61,7 +60,6 @@ int main(int argc, char *argv[])
   }
 
   mesh->distribute();
-
 
   // Periodic BC switch here
   // mesh->makePeriodic(_x, "slider_left", "slider_right");
@@ -231,10 +229,13 @@ int main(int argc, char *argv[])
   model->dump();
 
   std::ofstream energies;
-  auto file_name = std::filesystem::path("friction-energies-" + output_folder + ".csv");
-  energies.open(file_name.c_str(), std::ofstream::out | std::ofstream::trunc);
-
-  energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
+  if (prank == 0)
+  {
+    auto file_name =
+        std::filesystem::path("friction-energies-" + output_folder + ".csv");
+    energies.open(file_name.c_str(), std::ofstream::out | std::ofstream::trunc);
+    energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
+  }
 
   auto einit = 0.;
 
@@ -291,10 +292,14 @@ int main(int argc, char *argv[])
     {
       einit = ekin + epot - (work + econ[0] + econ[1]);
     }
-    energies << s * time_step << "," << ekin << "," << epot << "," << work
-             << "," << econ[0] << "," << econ[1] << ","
-             << ekin + epot - (work + econ[0] + econ[1]) - einit << std::endl;
-
+    
+    if (prank == 0)
+    {
+      energies << s * time_step << "," << ekin << "," << epot << "," << work
+               << "," << econ[0] << "," << econ[1] << ","
+               << ekin + epot - (work + econ[0] + econ[1]) - einit
+               << std::endl;
+    }
     if (s % dump_every == 0)
     {
       model->dump();
