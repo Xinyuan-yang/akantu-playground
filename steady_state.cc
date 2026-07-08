@@ -166,7 +166,7 @@ int main(int argc, char *argv[])
   Array<Real> &position = mesh->getNodes();
   UInt nb_nodes = model->getFEEngine().getMesh().getNbNodes();
 
-  Real t_fin = 0.5 / cs;
+  Real t_fin = 0.5 / cs * 5;
 
   // Steady state initialization
   for (UInt n = 0; n < nb_nodes; ++n)
@@ -230,7 +230,7 @@ int main(int argc, char *argv[])
   Real time_step = stable_time_step * time_step_factor;
   model->setTimeStep(time_step);
   UInt nb_steps = t_fin / time_step;
-  UInt dump_every = nb_steps / 200;
+  UInt dump_every = nb_steps / 500;
 
   std::cout << "Time step = " << time_step << std::endl;
   std::cout << "Number of steps = " << nb_steps << std::endl;
@@ -285,7 +285,11 @@ int main(int argc, char *argv[])
     energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
   }
 
+  //Add a pertubation field for steady analysis
   auto einit = 0.;
+  const UInt velocity_perturbation_step = 10;
+  const Real velocity_perturbation_amplitude = 0.01 * shear_vel;
+  const Real two_pi = 2. * std::acos(-1.);
 
   std::cout << "Starting simulation..." << std::endl;
 
@@ -299,6 +303,10 @@ int main(int argc, char *argv[])
     const Vector<Real> &lowerBounds = mesh->getLowerBounds();
     Real top = upperBounds(1);
     Real bottom = lowerBounds(1);
+    //get bounds for dimensionless operations further
+    Real left = lowerBounds(0);
+    Real right = upperBounds(0);
+    Real width = right - left;
     Real stable_time_step = model->getStableTimeStep();
     Real time_step = stable_time_step * time_step_factor;
     Real disp_incr = shear_vel * time_step;
@@ -313,6 +321,15 @@ int main(int argc, char *argv[])
       if (std::abs(position(n, 1) - bottom) < 1e-6)
       {
         velo(n, _x) = -0.5 * shear_vel;
+      }
+    }
+
+    if (s == velocity_perturbation_step && width > 0.)
+    {
+      for (UInt n = 0; n < nb_nodes; ++n)
+      {
+        const Real x = (position(n, 0) - left) / width;
+        velo(n, _x) += velocity_perturbation_amplitude * std::sin(two_pi * x);
       }
     }
 
