@@ -19,6 +19,7 @@
 #include "aka_common.hh"
 #include "mesh_partition_mesh_data.hh"
 #include "mesh_utils.hh"
+#include "node_synchronizer.hh"
 #include "ntn_base_contact.hh"
 #include "ntn_contact_solvercallback.hh"
 #include "ntn_initiation_function.hh"
@@ -182,6 +183,8 @@ int main(int argc, char *argv[])
 
   auto apply_follower_pressure = [&]()
   {
+    mesh->getNodeSynchronizer().synchronizeArray(displacement);
+
     for (UInt n = 0; n < nb_nodes; ++n)
     {
       for (UInt d = 0; d < spatial_dimension; ++d)
@@ -189,6 +192,7 @@ int main(int argc, char *argv[])
         current_position(n, d) = position(n, d) + displacement(n, d);
       }
     }
+    mesh->getNodeSynchronizer().synchronizeArray(current_position);
 
     auto &fem_boundary = model->getFEEngineBoundary();
     fem_boundary.computeNormalsOnIntegrationPoints(current_position, _not_ghost);
@@ -197,6 +201,100 @@ int main(int argc, char *argv[])
     model->getExternalForce().zero();
     model->applyBC(BC::Neumann::FromStress(pressure_top), "slider_top");
     model->applyBC(BC::Neumann::FromStress(pressure_bottom), "base_bottom");
+    mesh->getNodeSynchronizer().reduceSynchronizeArray<AddOperation>(
+        model->getExternalForce());
+  };
+
+  auto update_current_position = [&]()
+  {
+    for (UInt n = 0; n < nb_nodes; ++n)
+    {
+      for (UInt d = 0; d < spatial_dimension; ++d)
+      {
+        current_position(n, d) = position(n, d) + displacement(n, d);
+      }
+    }
+  };
+
+  auto get_boundary_tangent = [&](const std::string & group_name)
+  {
+    const auto &nodes =
+        mesh->getElementGroup(group_name).getNodeGroup().getNodes();
+
+    const Vector<Real> &upper_bounds = mesh->getUpperBounds();
+    const Vector<Real> &lower_bounds = mesh->getLowerBounds();
+    const Real left = lower_bounds(_x);
+    const Real right = upper_bounds(_x);
+    const Real tol = std::max(1e-12, 1e-10 * std::abs(right - left));
+
+    Vector<Real> left_point(spatial_dimension);
+    Vector<Real> right_point(spatial_dimension);
+    left_point.zero();
+    right_point.zero();
+    UInt left_count = 0;
+    UInt right_count = 0;
+
+    for (auto n : nodes)
+    {
+      if (not mesh->isLocalOrMasterNode(n))
+      {
+        continue;
+      }
+
+      if (std::abs(position(n, _x) - left) < tol)
+      {
+        for (UInt d = 0; d < spatial_dimension; ++d)
+        {
+          left_point(d) += current_position(n, d);
+        }
+        ++left_count;
+      }
+
+      if (std::abs(position(n, _x) - right) < tol)
+      {
+        for (UInt d = 0; d < spatial_dimension; ++d)
+        {
+          right_point(d) += current_position(n, d);
+        }
+        ++right_count;
+      }
+    }
+
+    comm.allReduce(left_point, SynchronizerOperation::_sum);
+    comm.allReduce(right_point, SynchronizerOperation::_sum);
+    comm.allReduce(left_count, SynchronizerOperation::_sum);
+    comm.allReduce(right_count, SynchronizerOperation::_sum);
+
+    Vector<Real> tangent(spatial_dimension);
+    tangent.zero();
+    tangent(_x) = 1.;
+
+    if (left_count > 0 and right_count > 0)
+    {
+      for (UInt d = 0; d < spatial_dimension; ++d)
+      {
+        left_point(d) /= left_count;
+        right_point(d) /= right_count;
+        tangent(d) = right_point(d) - left_point(d);
+      }
+
+      Real tangent_norm = 0.;
+      for (UInt d = 0; d < spatial_dimension; ++d)
+      {
+        tangent_norm += tangent(d) * tangent(d);
+      }
+      tangent_norm = std::sqrt(tangent_norm);
+
+      if (tangent_norm > 0.)
+      {
+        for (UInt d = 0; d < spatial_dimension; ++d)
+        {
+          tangent(d) /= tangent_norm;
+        }
+      }
+    }
+
+    return tangent;
   };
 
   Real t_fin = 0.5 / cs * 5;
@@ -204,6 +302,11 @@ int main(int argc, char *argv[])
   // Steady state initialization
   for (UInt n = 0; n < nb_nodes; ++n)
   {
+    if (not mesh->isLocalOrMasterNode(n))
+    {
+      continue;
+    }
+
     displacement(n, 0) = fss * -trac_top(1) / (shear_modulus)*position(n, 1);
     displacement(n, 1) = normal_strain_applied * position(n, 1);
   }
@@ -317,9 +420,6 @@ int main(int argc, char *argv[])
   energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
 
   auto einit = 0.;
-  const UInt velocity_perturbation_step = 10;
-  const Real velocity_perturbation_amplitude = 0.01 * shear_vel;
-  const Real two_pi = 2. * std::acos(-1.);
 
   std::cout << "Starting simulation..." << std::endl;
 
@@ -333,48 +433,67 @@ int main(int argc, char *argv[])
     const Vector<Real> &lowerBounds = mesh->getLowerBounds();
     Real top = upperBounds(1);
     Real bottom = lowerBounds(1);
-    Real left = lowerBounds(0);
-    Real right = upperBounds(0);
-    Real width = right - left;
     Real stable_time_step = model->getStableTimeStep();
     Real time_step = stable_time_step * time_step_factor;
     Real disp_incr = shear_vel * time_step;
     Array<Real> &displacement = model->getDisplacement();
     Array<bool> &blocked = model->getBlockedDOFs();
-    for (UInt n = 0; n < nb_nodes; ++n)
-    {
-      if (std::abs(position(n, 1) - top) < 1e-6)
-      {
-        velo(n, _x) = 0.5 * shear_vel;
-      }
-      if (std::abs(position(n, 1) - bottom) < 1e-6)
-      {
-        velo(n, _x) = -0.5 * shear_vel;
-      }
-    }
 
-    if (s == velocity_perturbation_step && width > 0.)
-    {
-      for (UInt n = 0; n < nb_nodes; ++n)
-      {
-        const Real x = (position(n, 0) - left) / width;
-        velo(n, _x) += velocity_perturbation_amplitude * std::sin(two_pi * x);
-      }
-    }
+    update_current_position();
+    const auto top_tangent = get_boundary_tangent("slider_top");
+    const auto bottom_tangent = get_boundary_tangent("base_bottom");
 
     for (UInt n = 0; n < nb_nodes; ++n)
     {
+      if (not mesh->isLocalOrMasterNode(n))
+      {
+        continue;
+      }
+
       if (std::abs(position(n, 1) - top) < 1e-6)
       {
-        displacement(n, 0) += 0.5 * disp_incr;
-        blocked(n, 0) = true;
+        for (UInt d = 0; d < spatial_dimension; ++d)
+        {
+          velo(n, d) = 0.5 * shear_vel * top_tangent(d);
+        }
       }
       if (std::abs(position(n, 1) - bottom) < 1e-6)
       {
-        displacement(n, 0) += -0.5 * disp_incr;
-        blocked(n, 0) = true;
+        for (UInt d = 0; d < spatial_dimension; ++d)
+        {
+          velo(n, d) = -0.5 * shear_vel * bottom_tangent(d);
+        }
       }
     }
+
+    for (UInt n = 0; n < nb_nodes; ++n)
+    {
+      if (not mesh->isLocalOrMasterNode(n))
+      {
+        continue;
+      }
+
+      if (std::abs(position(n, 1) - top) < 1e-6)
+      {
+        for (UInt d = 0; d < spatial_dimension; ++d)
+        {
+          displacement(n, d) += 0.5 * disp_incr * top_tangent(d);
+          blocked(n, d) = true;
+        }
+      }
+      if (std::abs(position(n, 1) - bottom) < 1e-6)
+      {
+        for (UInt d = 0; d < spatial_dimension; ++d)
+        {
+          displacement(n, d) += -0.5 * disp_incr * bottom_tangent(d);
+          blocked(n, d) = true;
+        }
+      }
+    }
+
+    mesh->getNodeSynchronizer().synchronizeArray(velo);
+    mesh->getNodeSynchronizer().synchronizeArray(displacement);
+    mesh->getNodeSynchronizer().synchronizeArray(blocked);
 
     apply_follower_pressure();
 
