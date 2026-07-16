@@ -35,13 +35,13 @@ int main(int argc, char *argv[])
   if (argc != 4)
   {
     std::cerr << "Usage: " << argv[0]
-              << " <coulomb-mu> <nb-it-nodes> <damping: n|s|l>" << std::endl;
+              << " <coulomb-mus> <nb-it-nodes> <damping: n|s|l>" << std::endl;
     return EXIT_FAILURE;
   }
 
-  const std::string input_file = "ras_ss_coulomb.in";
+  const std::string input_file = "ras_ss_sw.in";
   const std::string coulomb_mu_text = argv[1];
-  const Real coulomb_mu = std::stod(coulomb_mu_text);
+  const Real coulomb_mus = std::stod(coulomb_mu_text);
   const UInt nb_it_nodes = std::stoul(argv[2]);
   const std::string damping_mode = argv[3];
   initialize(input_file, argc, argv);
@@ -49,8 +49,9 @@ int main(int argc, char *argv[])
 
   const auto &comm = Communicator::getStaticCommunicator();
   auto prank = comm.whoAmI();
+
   std::string output_folder =
-      "steady_state_local_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
+      "steady_state_SW_local_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
   UInt spatial_dimension = data.getParameter("spatial_dimension");
   std::unique_ptr<Mesh> mesh;
   std::unique_ptr<SolidMechanicsModel> model;
@@ -58,6 +59,7 @@ int main(int argc, char *argv[])
   mesh = std::make_unique<Mesh>(spatial_dimension);
   const std::string mesh_file =
       "ntn_test_" + std::to_string(nb_it_nodes) + ".msh";
+
   if (prank == 0)
   {
     mesh->read(mesh_file);
@@ -133,7 +135,6 @@ int main(int argc, char *argv[])
 
   solver_ntn = std::make_unique<NTNContactSolverCallback>(
       *model, "slider_bottom", "base_top", normal_dir, time_step_factor);
-  solver_ntn->getContact()->initParallel();
 
   const auto &mat = model->getMaterial("slider");
 
@@ -157,7 +158,7 @@ int main(int argc, char *argv[])
   model->addDumpFieldVector("external_force");
 
   // Static analytical solution
-  Real fss = 0.3;
+  Real fss = 0.10; // set residual friction to 0.30 for steady state slip weakening
   Real E = mat.getParam("E");
   Real nu = mat.getParam("nu");
   Real shear_modulus = E / (2. * (1. + nu));
@@ -323,7 +324,14 @@ int main(int argc, char *argv[])
   auto &velo = model->getVelocity();
   auto &increment = model->getIncrement();
   auto friction = solver_ntn->getFriction();
-  friction->set("mu", coulomb_mu);
+
+  const Real mu_s = coulomb_mus; // keep static friction from argv[1]
+  const Real mu_d = 0.1;
+  const Real d_c = 1e-6;
+
+  friction->set("mu_s", mu_s);
+  friction->set("mu_k", mu_d);
+  friction->set("d_c", d_c);
   auto dt = model->getTimeStep();
 
   for (auto n : slider_nodes)
@@ -338,11 +346,6 @@ int main(int argc, char *argv[])
   }
 
   auto contact = solver_ntn->getContact();
-
-  std::cout << "rank " << prank
-            << " contact nodes = "
-            << solver_ntn->getContact()->getNbContactNodes()
-            << std::endl;
 
   auto &slip_velocity = friction->getSlipVelocity();
   auto &slip_velocity_norm = friction->getSlipVelocityNorm();
@@ -411,13 +414,10 @@ int main(int argc, char *argv[])
   std::cout << "has C = " << model->getDOFManager().hasMatrix("C") << std::endl;
 
   std::ofstream energies;
-  if (prank == 0)
-  {
-    auto file_name =
-        std::filesystem::path("friction-energies-" + output_folder + ".csv");
-    energies.open(file_name.c_str(), std::ofstream::out | std::ofstream::trunc);
-    energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
-  }
+  auto file_name = std::filesystem::path("friction-energies-" + output_folder + ".csv");
+  energies.open(file_name.c_str(), std::ofstream::out | std::ofstream::trunc);
+
+  energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
 
   auto einit = 0.;
 
@@ -507,13 +507,10 @@ int main(int argc, char *argv[])
     {
       einit = ekin + epot - (work + econ[0] + econ[1]);
     }
-    if (prank == 0)
-    {
-      energies << s * time_step << "," << ekin << "," << epot << "," << work
-               << "," << econ[0] << "," << econ[1] << ","
-               << ekin + epot - (work + econ[0] + econ[1]) - einit
-               << std::endl;
-    }
+    energies << s * time_step << "," << ekin << "," << epot << "," << work
+             << "," << econ[0] << "," << econ[1] << ","
+             << ekin + epot - (work + econ[0] + econ[1]) - einit << std::endl;
+
     if (s % dump_every == 0)
     {
       model->dump();

@@ -157,7 +157,7 @@ int main(int argc, char *argv[])
   model->addDumpFieldVector("external_force");
 
   // Static analytical solution
-  Real fss = 0.3;
+  Real fss = coulomb_mu; // keep static friction from argv[1]
   Real E = mat.getParam("E");
   Real nu = mat.getParam("nu");
   Real shear_modulus = E / (2. * (1. + nu));

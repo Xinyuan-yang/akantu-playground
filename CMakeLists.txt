@@ -40,6 +40,9 @@ add_akantu_simulation(steady_state steady_state.cc)
 add_akantu_simulation(steady_state_sw steady_state_slipweakening.cc)
 add_akantu_simulation(steady_state_sw_local steady_state_SW_local.cc)
 add_akantu_simulation(steady_state_local steady_state_local.cc)
+add_akantu_simulation(steady_state_sw_local_gentlenudge steady_state_SW_local_gentlenudge.cc)
+add_akantu_simulation(steady_state_local_gentlenudge steady_state_local_gentlenudge.cc)
+
 
 add_mesh(bloc bloc.geo 2 1)
 add_dependencies(bloc_friction bloc)
