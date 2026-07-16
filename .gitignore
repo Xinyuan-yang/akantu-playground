@@ -37,6 +37,8 @@ steady_state
 __pycache__/
 *.py[cod]
 .ipynb_checkpoints/
+*.mp4
+*.png
 
 # Editor and OS noise
 .vscode/
