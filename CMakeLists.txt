@@ -18,6 +18,11 @@ configure_file(
     ${CMAKE_CURRENT_BINARY_DIR}/ras_ss.in
     COPYONLY
 )
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/ras_ss_swnh.in
+    ${CMAKE_CURRENT_BINARY_DIR}/ras_ss_swnh.in
+    COPYONLY
+)
 
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/ras_ss_coulomb.in
@@ -58,3 +63,4 @@ add_dependencies(steady_state_local ntn_test_100 ntn_test_200 ntn_test_500 ntn_t
 add_akantu_simulation(steady_state_Method1 steady_state_Method1.cc)
 add_akantu_simulation(steady_state_SW_slow steady_state_SW_slow.cc)
 add_akantu_simulation(steady_state_SW_Sslow steady_state_SW_Sslow.cc)
+add_akantu_simulation(steady_state_SW_noheal steady_state_SW_noheal.cc)

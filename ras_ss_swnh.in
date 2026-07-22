@@ -20,7 +20,7 @@ user parameters [
      time_step_factor = 0.05
 ]
 
-friction linear_slip_weakening [
+friction linear_slip_weakening_no_healing [
 ]
 
 material elastic [
