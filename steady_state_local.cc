@@ -51,7 +51,7 @@ int main(int argc, char *argv[])
   auto prank = comm.whoAmI();
 
   std::string output_folder =
-      "steady_state_local_10MPa_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
+      "steady_state_Vlocal_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
   UInt spatial_dimension = data.getParameter("spatial_dimension");
   std::unique_ptr<Mesh> mesh;
   std::unique_ptr<SolidMechanicsModel> model;
@@ -297,11 +297,11 @@ int main(int argc, char *argv[])
     return tangent;
   };
 
-  Real t_fin = 0.5 / cs * 5;
+  Real t_fin = 0.5 / cs * 10;
 
 
   // Smooth ramp duration: 2 * (domain size in x) / c_s, with L_x = 0.5
-  const Real ramp_time = 0.2 * 0.5 / cs;
+  const Real ramp_time = 5 * 0.5 / cs;
   const Real pi = std::acos(-1.);
   auto ramp_factor = [&](Real t)
   {
