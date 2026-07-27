@@ -49,8 +49,9 @@ int main(int argc, char *argv[])
 
   const auto &comm = Communicator::getStaticCommunicator();
   auto prank = comm.whoAmI();
+
   std::string output_folder =
-      "steady_state_local_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
+      "steady_state_local_10MPa_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
   UInt spatial_dimension = data.getParameter("spatial_dimension");
   std::unique_ptr<Mesh> mesh;
   std::unique_ptr<SolidMechanicsModel> model;
@@ -58,6 +59,7 @@ int main(int argc, char *argv[])
   mesh = std::make_unique<Mesh>(spatial_dimension);
   const std::string mesh_file =
       "ntn_test_" + std::to_string(nb_it_nodes) + ".msh";
+
   if (prank == 0)
   {
     mesh->read(mesh_file);
@@ -133,7 +135,6 @@ int main(int argc, char *argv[])
 
   solver_ntn = std::make_unique<NTNContactSolverCallback>(
       *model, "slider_bottom", "base_top", normal_dir, time_step_factor);
-  solver_ntn->getContact()->initParallel();
 
   const auto &mat = model->getMaterial("slider");
 
@@ -157,7 +158,7 @@ int main(int argc, char *argv[])
   model->addDumpFieldVector("external_force");
 
   // Static analytical solution
-  Real fss = 0.3;
+  Real fss = 0.10; // set residual friction to 0.30 for steady state slip weakening
   Real E = mat.getParam("E");
   Real nu = mat.getParam("nu");
   Real shear_modulus = E / (2. * (1. + nu));
@@ -298,17 +299,34 @@ int main(int argc, char *argv[])
 
   Real t_fin = 0.5 / cs * 5;
 
-  // Steady state initialization
-  for (UInt n = 0; n < nb_nodes; ++n)
-  {
-    if (not mesh->isLocalOrMasterNode(n))
-    {
-      continue;
-    }
 
-    displacement(n, 0) = fss * -trac_top(1) / (shear_modulus)*position(n, 1);
-    displacement(n, 1) = normal_strain_applied * position(n, 1);
-  }
+  // Smooth ramp duration: 2 * (domain size in x) / c_s, with L_x = 0.5
+  const Real ramp_time = 0.2 * 0.5 / cs;
+  const Real pi = std::acos(-1.);
+  auto ramp_factor = [&](Real t)
+  {
+    if (t >= ramp_time)
+    {
+      return 1.;
+    }
+    if (t <= 0.)
+    {
+      return 0.;
+    }
+    return 0.5 * (1. - std::cos(pi * t / ramp_time));
+  };
+
+  // Steady state initialization
+   for (UInt n = 0; n < nb_nodes; ++n)
+   {
+     if (not mesh->isLocalOrMasterNode(n))
+     {
+       continue;
+     }
+
+     //displacement(n, 0) = fss * -trac_top(1) / (shear_modulus)*position(n, 1);
+     displacement(n, 1) = normal_strain_applied * position(n, 1);
+   }
 
   // Set follower pressure boundary conditions for dynamic simulation
   apply_follower_pressure();
@@ -323,7 +341,10 @@ int main(int argc, char *argv[])
   auto &velo = model->getVelocity();
   auto &increment = model->getIncrement();
   auto friction = solver_ntn->getFriction();
-  friction->set("mu", coulomb_mu);
+
+  const Real mu = coulomb_mu; // keep static friction from argv[1]
+
+  friction->set("mu", mu);
   auto dt = model->getTimeStep();
 
   for (auto n : slider_nodes)
@@ -338,11 +359,6 @@ int main(int argc, char *argv[])
   }
 
   auto contact = solver_ntn->getContact();
-
-  std::cout << "rank " << prank
-            << " contact nodes = "
-            << solver_ntn->getContact()->getNbContactNodes()
-            << std::endl;
 
   auto &slip_velocity = friction->getSlipVelocity();
   auto &slip_velocity_norm = friction->getSlipVelocityNorm();
@@ -411,13 +427,10 @@ int main(int argc, char *argv[])
   std::cout << "has C = " << model->getDOFManager().hasMatrix("C") << std::endl;
 
   std::ofstream energies;
-  if (prank == 0)
-  {
-    auto file_name =
-        std::filesystem::path("friction-energies-" + output_folder + ".csv");
-    energies.open(file_name.c_str(), std::ofstream::out | std::ofstream::trunc);
-    energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
-  }
+  auto file_name = std::filesystem::path("friction-energies-" + output_folder + ".csv");
+  energies.open(file_name.c_str(), std::ofstream::out | std::ofstream::trunc);
+
+  energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
 
   auto einit = 0.;
 
@@ -435,13 +448,16 @@ int main(int argc, char *argv[])
     Real bottom = lowerBounds(1);
     Real stable_time_step = model->getStableTimeStep();
     Real time_step = stable_time_step * time_step_factor;
-    Real disp_incr = shear_vel * time_step;
     Array<Real> &displacement = model->getDisplacement();
     Array<bool> &blocked = model->getBlockedDOFs();
 
     update_current_position();
     const auto top_tangent = get_boundary_tangent("slider_top");
     const auto bottom_tangent = get_boundary_tangent("base_bottom");
+
+    Real t = s * time_step;
+    Real rf = ramp_factor(t);
+    Real current_shear_vel = rf * shear_vel;
 
     for (UInt n = 0; n < nb_nodes; ++n)
     {
@@ -454,18 +470,19 @@ int main(int argc, char *argv[])
       {
         for (UInt d = 0; d < spatial_dimension; ++d)
         {
-          velo(n, d) = 0.5 * shear_vel * top_tangent(d);
+          velo(n, d) = 0.5 * current_shear_vel * top_tangent(d);
         }
       }
       if (std::abs(position(n, 1) - bottom) < 1e-6)
       {
         for (UInt d = 0; d < spatial_dimension; ++d)
         {
-          velo(n, d) = -0.5 * shear_vel * bottom_tangent(d);
+          velo(n, d) = -0.5 * current_shear_vel * bottom_tangent(d);
         }
       }
     }
 
+    Real disp_incr = current_shear_vel * time_step;
     for (UInt n = 0; n < nb_nodes; ++n)
     {
       if (not mesh->isLocalOrMasterNode(n))
@@ -507,16 +524,13 @@ int main(int argc, char *argv[])
     {
       einit = ekin + epot - (work + econ[0] + econ[1]);
     }
-    if (prank == 0)
-    {
-      energies << s * time_step << "," << ekin << "," << epot << "," << work
-               << "," << econ[0] << "," << econ[1] << ","
-               << ekin + epot - (work + econ[0] + econ[1]) - einit
-               << std::endl;
-    }
+    energies << s * time_step << "," << ekin << "," << epot << "," << work
+             << "," << econ[0] << "," << econ[1] << ","
+             << ekin + epot - (work + econ[0] + econ[1]) - einit << std::endl;
+
     if (s % dump_every == 0)
     {
-      model->dump();
+      model->dump(s);
       std::cout << "Step " << s << "\t\r" << std::flush;
     }
   }

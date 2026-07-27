@@ -51,7 +51,7 @@ int main(int argc, char *argv[])
   auto prank = comm.whoAmI();
 
   std::string output_folder =
-      "steady_state_SW_slow_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
+      "steady_state_SW_slow_10MPa_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
   UInt spatial_dimension = data.getParameter("spatial_dimension");
   std::unique_ptr<Mesh> mesh;
   std::unique_ptr<SolidMechanicsModel> model;
@@ -301,7 +301,7 @@ int main(int argc, char *argv[])
 
 
   // Smooth ramp duration: 2 * (domain size in x) / c_s, with L_x = 0.5
-  const Real ramp_time = 2. * 0.5 / cs;
+  const Real ramp_time = 0.2 * 0.5 / cs;
   const Real pi = std::acos(-1.);
   auto ramp_factor = [&](Real t)
   {
@@ -317,16 +317,16 @@ int main(int argc, char *argv[])
   };
 
   // Steady state initialization
-//   for (UInt n = 0; n < nb_nodes; ++n)
-//   {
-//     if (not mesh->isLocalOrMasterNode(n))
-//     {
-//       continue;
-//     }
+   for (UInt n = 0; n < nb_nodes; ++n)
+   {
+     if (not mesh->isLocalOrMasterNode(n))
+     {
+       continue;
+     }
 
-//     displacement(n, 0) = fss * -trac_top(1) / (shear_modulus)*position(n, 1);
-//     displacement(n, 1) = normal_strain_applied * position(n, 1);
-//   }
+     //displacement(n, 0) = fss * -trac_top(1) / (shear_modulus)*position(n, 1);
+     displacement(n, 1) = normal_strain_applied * position(n, 1);
+   }
 
   // Set follower pressure boundary conditions for dynamic simulation
   apply_follower_pressure();
@@ -534,7 +534,7 @@ int main(int argc, char *argv[])
 
     if (s % dump_every == 0)
     {
-      model->dump();
+      model->dump(s);
       std::cout << "Step " << s << "\t\r" << std::flush;
     }
   }
