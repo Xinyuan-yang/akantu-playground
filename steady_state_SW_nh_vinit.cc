@@ -162,7 +162,9 @@ int main(int argc, char *argv[])
   Real E = mat.getParam("E");
   Real nu = mat.getParam("nu");
   Real shear_modulus = E / (2. * (1. + nu));
-  Real normal_strain_applied = trac_top(1) / E - nu * nu * trac_top(1) / E;
+  // Plane-stress preload with traction-free lateral boundaries: sigma_xx = 0.
+  const Real normal_strain_applied = trac_top(_y) / E;
+  const Real lateral_strain_applied = -nu * normal_strain_applied;
 
   Array<Real> &displacement = model->getDisplacement();
   Array<Real> &position = mesh->getNodes();
@@ -201,8 +203,6 @@ int main(int argc, char *argv[])
     model->getExternalForce().zero();
     model->applyBC(BC::Neumann::FromStress(pressure_top), "slider_top");
     model->applyBC(BC::Neumann::FromStress(pressure_bottom), "base_bottom");
-    mesh->getNodeSynchronizer().reduceSynchronizeArray<AddOperation>(
-        model->getExternalForce());
   };
 
   auto update_current_position = [&]()
@@ -317,6 +317,10 @@ int main(int argc, char *argv[])
   };
 
   // Steady state initialization
+  const Real left = mesh->getLowerBounds()(_x);
+  const Real right = mesh->getUpperBounds()(_x);
+  const Real x_mid = 0.5 * (left + right);
+
    for (UInt n = 0; n < nb_nodes; ++n)
    {
      if (not mesh->isLocalOrMasterNode(n))
@@ -324,8 +328,10 @@ int main(int argc, char *argv[])
        continue;
      }
 
-     displacement(n, 0) = fss * -trac_top(1) / (shear_modulus)*position(n, 1) * 0.8;
-     displacement(n, 1) = normal_strain_applied * position(n, 1);
+     displacement(n, _x) =
+         lateral_strain_applied * (position(n, _x) - x_mid) +
+         fss * -trac_top(_y) / shear_modulus * position(n, _y) * 0.8;
+     displacement(n, _y) = normal_strain_applied * position(n, _y);
    }
 
   // Set follower pressure boundary conditions for dynamic simulation
@@ -448,6 +454,7 @@ int main(int argc, char *argv[])
   energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
 
   auto einit = 0.;
+  Real external_work = 0.;
 
   std::cout << "Starting simulation..." << std::endl;
 
@@ -471,7 +478,7 @@ int main(int argc, char *argv[])
     const auto bottom_tangent = get_boundary_tangent("base_bottom");
 
     Real t = s * time_step;
-    Real rf = ramp_factor(t);
+    Real rf = 1.0;
     Real current_shear_vel = rf * shear_vel;
 
     for (UInt n = 0; n < nb_nodes; ++n)
@@ -533,19 +540,23 @@ int main(int argc, char *argv[])
 
     auto ekin = model->getEnergy("kinetic");
     auto epot = model->getEnergy("potential");
-    auto work = model->getEnergy("external work new");
+    const auto external_work_increment =
+        model->getEnergy("external work");
+    external_work += external_work_increment;
     auto econ = solver_ntn->getExternalWork();
     if (s == 0)
     {
-      einit = ekin + epot - (work + econ[0] + econ[1]);
+      einit = ekin + epot - (external_work + econ[0] + econ[1]);
     }
-    energies << s * time_step << "," << ekin << "," << epot << "," << work
+    energies << s * time_step << "," << ekin << "," << epot << "," << external_work
              << "," << econ[0] << "," << econ[1] << ","
-             << ekin + epot - (work + econ[0] + econ[1]) - einit << std::endl;
+             << ekin + epot - (external_work + econ[0] + econ[1]) - einit
+             << std::endl;
 
     if (s % dump_every == 0)
     {
-      model->dump(s);
+      const Real dump_time = (s + 1) * time_step;
+      model->dump(dump_time, s + 1);
       std::cout << "Step " << s << "\t\r" << std::flush;
     }
   }
