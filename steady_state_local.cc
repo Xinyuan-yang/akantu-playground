@@ -51,7 +51,7 @@ int main(int argc, char *argv[])
   auto prank = comm.whoAmI();
 
   std::string output_folder =
-      "steady_state_local_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
+      "Coulomb_new_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
   UInt spatial_dimension = data.getParameter("spatial_dimension");
   std::unique_ptr<Mesh> mesh;
   std::unique_ptr<SolidMechanicsModel> model;
@@ -352,6 +352,18 @@ int main(int argc, char *argv[])
   friction->set("mu", mu);
   auto dt = model->getTimeStep();
 
+  for (UInt n = 0; n < nb_nodes; ++n)
+   {
+     if (not mesh->isLocalOrMasterNode(n))
+     {
+       continue;
+     }
+
+     velo(n, _x) = 0.5 * shear_vel * position(n, 1) / 0.1;
+     increment(n, _x) = 0.5 * shear_vel * position(n, 1) / 0.1 * dt;
+   }
+
+
   // for (auto n : slider_nodes)
   // {
   //   velo(n, _x) = 0.5 * shear_vel;
@@ -438,6 +450,7 @@ int main(int argc, char *argv[])
   energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
 
   auto einit = 0.;
+  Real external_work = 0.;
 
   std::cout << "Starting simulation..." << std::endl;
 
@@ -523,15 +536,18 @@ int main(int argc, char *argv[])
 
     auto ekin = model->getEnergy("kinetic");
     auto epot = model->getEnergy("potential");
-    auto work = model->getEnergy("external work new");
+    const auto external_work_increment =
+        model->getEnergy("external work");
+    external_work += external_work_increment;
     auto econ = solver_ntn->getExternalWork();
     if (s == 0)
     {
-      einit = ekin + epot - (work + econ[0] + econ[1]);
+      einit = ekin + epot - (external_work + econ[0] + econ[1]);
     }
-    energies << s * time_step << "," << ekin << "," << epot << "," << work
+    energies << s * time_step << "," << ekin << "," << epot << "," << external_work
              << "," << econ[0] << "," << econ[1] << ","
-             << ekin + epot - (work + econ[0] + econ[1]) - einit << std::endl;
+             << ekin + epot - (external_work + econ[0] + econ[1]) - einit
+             << std::endl;
 
     if (s % dump_every == 0)
     {
