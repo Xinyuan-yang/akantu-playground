@@ -297,7 +297,7 @@ int main(int argc, char *argv[])
     return tangent;
   };
 
-  Real t_fin = 0.5 / cs * 10;
+  Real t_fin = 0.5 / cs * 6;
 
 
   // Smooth ramp duration: 2 * (domain size in x) / c_s, with L_x = 0.5
@@ -329,7 +329,7 @@ int main(int argc, char *argv[])
      }
 
      displacement(n, _x) =
-         lateral_strain_applied * (position(n, _x) - x_mid)  + fss * -trac_top(1) / (shear_modulus)*position(n, _y) * 0.8;
+         lateral_strain_applied * (position(n, _x) - x_mid)  + fss * -trac_top(1) / (shear_modulus)*position(n, _y) * 0.95;
      displacement(n, _y) = normal_strain_applied * position(n, _y);
    }
 
@@ -474,7 +474,7 @@ int main(int argc, char *argv[])
     const auto bottom_tangent = get_boundary_tangent("base_bottom");
 
     Real t = s * time_step;
-    Real rf = ramp_factor(t);
+    Real rf = 1.0;
     Real current_shear_vel = rf * shear_vel;
 
     for (UInt n = 0; n < nb_nodes; ++n)

@@ -297,24 +297,7 @@ int main(int argc, char *argv[])
     return tangent;
   };
 
-  Real t_fin = 0.5 / cs * 10;
-
-
-  // Smooth ramp duration: 2 * (domain size in x) / c_s, with L_x = 0.5
-  const Real ramp_time = 5 * 0.5 / cs;
-  const Real pi = std::acos(-1.);
-  auto ramp_factor = [&](Real t)
-  {
-    if (t >= ramp_time)
-    {
-      return 1.;
-    }
-    if (t <= 0.)
-    {
-      return 0.;
-    }
-    return 0.5 * (1. - std::cos(pi * t / ramp_time));
-  };
+  Real t_fin = 0.5 / cs * 6;
 
   // Steady state initialization
   const Real left = mesh->getLowerBounds()(_x);
@@ -330,7 +313,7 @@ int main(int argc, char *argv[])
 
      displacement(n, _x) =
          lateral_strain_applied * (position(n, _x) - x_mid) +
-         fss * -trac_top(_y) / shear_modulus * position(n, _y) * 0.8;
+         fss * -trac_top(_y) / shear_modulus * position(n, _y) * 0.95;
      displacement(n, _y) = normal_strain_applied * position(n, _y);
    }
 
