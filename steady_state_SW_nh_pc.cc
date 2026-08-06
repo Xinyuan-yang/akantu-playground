@@ -51,7 +51,7 @@ int main(int argc, char *argv[])
   auto prank = comm.whoAmI();
 
   std::string output_folder =
-      "SW_noheal_vini_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
+      "SW_noheal_vini_pc_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
   UInt spatial_dimension = data.getParameter("spatial_dimension");
   std::unique_ptr<Mesh> mesh;
   std::unique_ptr<SolidMechanicsModel> model;
@@ -357,7 +357,33 @@ int main(int argc, char *argv[])
   friction->set("mu_s", mu_s);
   friction->set("mu_k", mu_d);
   friction->set("d_c", d_c);
+
+  // With velocity-controlled steady sliding, a stress-controlled nucleation
+  // length is not finite. Use a geometric centered precrack instead.
+  const Real precrack_length = (right - left) / 20.;
+  const Real precrack_half_length = 0.5 * precrack_length;
   auto contact = solver_ntn->getContact();
+  UInt weak_zone_nodes = 0;
+
+  for (Int n = 0; n < contact->getNbContactNodes(); ++n)
+  {
+    const Idx slave = contact->getSlaves()(n);
+    if (std::abs(position(slave, _x) - x_mid) <= precrack_half_length)
+    {
+      friction->setParam("mu_s", static_cast<UInt>(n), mu_d);
+      if (mesh->isLocalOrMasterNode(slave))
+      {
+        ++weak_zone_nodes;
+      }
+    }
+  }
+
+  comm.allReduce(weak_zone_nodes, SynchronizerOperation::_sum);
+  if (prank == 0)
+  {
+    std::cout << "Centered weak zone: length = " << precrack_length
+              << " (L / 20), nodes = " << weak_zone_nodes << std::endl;
+  }
   velo.zero();
   increment.zero();
 
@@ -379,6 +405,9 @@ int main(int argc, char *argv[])
   friction->setBaseName(output_folder + "_friction_interface");
   friction->addDumpField("friction_traction");
   friction->addDumpField("frictional_strength");
+  friction->addDumpField("mu_s");
+  friction->addDumpField("mu_k");
+  friction->addDumpField("d_c");
 
   auto &slip_velocity = friction->getSlipVelocity();
   auto &slip_velocity_norm = friction->getSlipVelocityNorm();
