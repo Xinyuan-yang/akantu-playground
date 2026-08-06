@@ -135,6 +135,7 @@ int main(int argc, char *argv[])
 
   solver_ntn = std::make_unique<NTNContactSolverCallback>(
       *model, "slider_bottom", "base_top", normal_dir, time_step_factor);
+  solver_ntn->getContact()->initParallel();
 
   const auto &mat = model->getMaterial("slider");
 
@@ -299,7 +300,26 @@ int main(int argc, char *argv[])
 
   Real t_fin = 0.5 / cs * 5;
 
+  // Smoothly introduce the imposed sliding velocity from rest.
+  const Real ramp_time = 2. * 0.5 / cs;
+  const Real pi = std::acos(-1.);
+  auto ramp_factor = [&](Real t)
+  {
+    if (t >= ramp_time)
+    {
+      return 1.;
+    }
+    if (t <= 0.)
+    {
+      return 0.;
+    }
+    return 0.5 * (1. - std::cos(pi * t / ramp_time));
+  };
+
   // Steady state initialization
+  const Real left = mesh->getLowerBounds()(_x);
+  const Real right = mesh->getUpperBounds()(_x);
+  const Real x_mid = 0.5 * (left + right);
   for (UInt n = 0; n < nb_nodes; ++n)
   {
     if (not mesh->isLocalOrMasterNode(n))
@@ -320,7 +340,7 @@ int main(int argc, char *argv[])
   const auto &base_nodes =
       mesh->getElementGroup("base").getNodeGroup().getNodes();
 
-  // Specify initial nodal velocity
+  // Start from rest; the boundary velocity is imposed through the ramp below.
   auto &velo = model->getVelocity();
   auto &increment = model->getIncrement();
   auto friction = solver_ntn->getFriction();
@@ -332,20 +352,45 @@ int main(int argc, char *argv[])
   friction->set("mu_s", mu_s);
   friction->set("mu_k", mu_d);
   friction->set("d_c", d_c);
-  auto dt = model->getTimeStep();
-
-  for (auto n : slider_nodes)
-  {
-    velo(n, _x) = 0.5 * shear_vel;
-    increment(n, _x) = 0.5 * shear_vel * dt;
-  }
-  for (auto n : base_nodes)
-  {
-    velo(n, _x) = -0.5 * shear_vel;
-    increment(n, _x) = -0.5 * shear_vel * dt;
-  }
-
+  // With velocity-controlled steady sliding, use a geometric centered
+  // precrack rather than a stress-controlled nucleation length.
+  const Real precrack_length = (right - left) / 20.;
+  const Real precrack_half_length = 0.5 * precrack_length;
   auto contact = solver_ntn->getContact();
+  UInt weak_zone_nodes = 0;
+
+  for (Int n = 0; n < contact->getNbContactNodes(); ++n)
+  {
+    const Idx slave = contact->getSlaves()(n);
+    if (std::abs(position(slave, _x) - x_mid) <= precrack_half_length)
+    {
+      friction->setParam("mu_s", static_cast<UInt>(n), mu_d);
+      if (mesh->isLocalOrMasterNode(slave))
+      {
+        ++weak_zone_nodes;
+      }
+    }
+  }
+
+  comm.allReduce(weak_zone_nodes, SynchronizerOperation::_sum);
+  if (prank == 0)
+  {
+    std::cout << "Centered weak zone: length = " << precrack_length
+              << " (L / 20), nodes = " << weak_zone_nodes << std::endl;
+  }
+  velo.zero();
+  increment.zero();
+
+  contact->setBaseName(output_folder + "_contact_interface");
+  contact->addDumpField("normals");
+  contact->addDumpField("contact_pressure");
+
+  friction->setBaseName(output_folder + "_friction_interface");
+  friction->addDumpField("friction_traction");
+  friction->addDumpField("frictional_strength");
+  friction->addDumpField("mu_s");
+  friction->addDumpField("mu_k");
+  friction->addDumpField("d_c");
 
   auto &slip_velocity = friction->getSlipVelocity();
   auto &slip_velocity_norm = friction->getSlipVelocityNorm();
@@ -372,6 +417,7 @@ int main(int argc, char *argv[])
   std::cout << "Time step = " << time_step << std::endl;
   std::cout << "Number of steps = " << nb_steps << std::endl;
   std::cout << "Dump every = " << dump_every << std::endl;
+  std::cout << "Ramp time = " << ramp_time << std::endl;
 
   Real alpha = 0; // mass proportional damping
   Real beta = 0;  // stiffness proportional damping
@@ -435,13 +481,16 @@ int main(int argc, char *argv[])
     Real bottom = lowerBounds(1);
     Real stable_time_step = model->getStableTimeStep();
     Real time_step = stable_time_step * time_step_factor;
-    Real disp_incr = shear_vel * time_step;
     Array<Real> &displacement = model->getDisplacement();
     Array<bool> &blocked = model->getBlockedDOFs();
 
     update_current_position();
     const auto top_tangent = get_boundary_tangent("slider_top");
     const auto bottom_tangent = get_boundary_tangent("base_bottom");
+
+    Real t = s * time_step;
+    Real rf = ramp_factor(t);
+    Real current_shear_vel = rf * shear_vel;
 
     for (UInt n = 0; n < nb_nodes; ++n)
     {
@@ -454,18 +503,19 @@ int main(int argc, char *argv[])
       {
         for (UInt d = 0; d < spatial_dimension; ++d)
         {
-          velo(n, d) = 0.5 * shear_vel * top_tangent(d);
+          velo(n, d) = 0.5 * current_shear_vel * top_tangent(d);
         }
       }
       if (std::abs(position(n, 1) - bottom) < 1e-6)
       {
         for (UInt d = 0; d < spatial_dimension; ++d)
         {
-          velo(n, d) = -0.5 * shear_vel * bottom_tangent(d);
+          velo(n, d) = -0.5 * current_shear_vel * bottom_tangent(d);
         }
       }
     }
 
+    Real disp_incr = current_shear_vel * time_step;
     for (UInt n = 0; n < nb_nodes; ++n)
     {
       if (not mesh->isLocalOrMasterNode(n))
@@ -513,7 +563,10 @@ int main(int argc, char *argv[])
 
     if (s % dump_every == 0)
     {
-      model->dump();
+      const Real dump_time = (s + 1) * time_step;
+      model->dump(dump_time, s + 1);
+      contact->dump(dump_time, s + 1);
+      friction->dump(dump_time, s + 1);
       std::cout << "Step " << s << "\t\r" << std::flush;
     }
   }
