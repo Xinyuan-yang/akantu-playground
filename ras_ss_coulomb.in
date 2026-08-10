@@ -2,7 +2,7 @@ user parameters [
      # BOUNDARY CONDITIONS
      top_traction  = [ 0.0e+06 , -1e7 ]
      bot_traction  = [ -0.0e+06 ,  1e7 ]
-     shear_velocity = 6e-2
+     shear_velocity = 3e-1
 
      mesh = "ntn_test_ras.msh"
      spatial_dimension = 2
