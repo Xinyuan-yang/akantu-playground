@@ -14,6 +14,12 @@ configure_file(
 )
 
 configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/ntn_static.in
+    ${CMAKE_CURRENT_BINARY_DIR}/ntn_static.in
+    COPYONLY
+)
+
+configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/ras_ss.in
     ${CMAKE_CURRENT_BINARY_DIR}/ras_ss.in
     COPYONLY
@@ -57,6 +63,10 @@ add_mesh(ntn_test_101 ntn_test_101.geo 2 1)
 add_mesh(ntn_test_200 ntn_test_200.geo 2 1)
 add_mesh(ntn_test_500 ntn_test_500.geo 2 1)
 add_mesh(ntn_test_1000 ntn_test_1000.geo 2 1)
+add_mesh(ntn_static_100 ntn_static_100.geo 2 1)
+add_mesh(ntn_static_200 ntn_static_200.geo 2 1)
+add_mesh(ntn_static_500 ntn_static_500.geo 2 1)
+add_mesh(ntn_static_1000 ntn_static_1000.geo 2 1)
 add_dependencies(steady_state ntn_test_100 ntn_test_101 ntn_test_200 ntn_test_500 ntn_test_1000)
 add_dependencies(steady_state_sw_local ntn_test_100 ntn_test_101 ntn_test_200 ntn_test_500 ntn_test_1000)
 add_dependencies(steady_state_local ntn_test_100 ntn_test_101 ntn_test_200 ntn_test_500 ntn_test_1000)
@@ -67,3 +77,7 @@ add_akantu_simulation(steady_state_SW_Sslow steady_state_SW_Sslow.cc)
 add_akantu_simulation(steady_state_SW_noheal steady_state_SW_noheal.cc)
 add_akantu_simulation(steady_state_SW_nh_vinit steady_state_SW_nh_vinit.cc)
 add_akantu_simulation(steady_state_SW_nh_pc steady_state_SW_nh_pc.cc)
+add_akantu_simulation(steady_state_TEST steady_state_TEST.cc)
+
+add_akantu_simulation(simple_shear_static simple_shear_static.cc)
+add_dependencies(simple_shear_static ntn_static_1000 ntn_static_500 ntn_static_200 ntn_static_100)
