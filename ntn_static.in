@@ -1,0 +1,22 @@
+user parameters [
+     # Equivalent uniaxial plane-stress compression, imposed through
+     # coordinate-dependent Dirichlet displacements (not a Neumann load).
+     normal_stress = -1.0e7
+     simulation_name = "test"
+     spatial_dimension = 2
+     output_folder = "test_x"
+     
+          
+     # TIME
+     nb_steps  = 1000
+     dump_every = 10
+     time_step_factor = 0.05
+]
+
+material elastic [
+     name = slider
+     rho  = 1200
+     nu   = 0.33
+     E    = 7.98e9
+     Plane_Stress = 1
+]
