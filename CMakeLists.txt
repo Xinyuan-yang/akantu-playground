@@ -78,6 +78,7 @@ add_akantu_simulation(steady_state_SW_noheal steady_state_SW_noheal.cc)
 add_akantu_simulation(steady_state_SW_nh_vinit steady_state_SW_nh_vinit.cc)
 add_akantu_simulation(steady_state_SW_nh_pc steady_state_SW_nh_pc.cc)
 add_akantu_simulation(steady_state_TEST steady_state_TEST.cc)
+add_akantu_simulation(steady_state_SW_nh_peri steady_state_SW_nh_peri.cc)
 
 add_akantu_simulation(simple_shear_static simple_shear_static.cc)
 add_dependencies(simple_shear_static ntn_static_1000 ntn_static_500 ntn_static_200 ntn_static_100)
