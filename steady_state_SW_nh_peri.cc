@@ -171,7 +171,7 @@ int main(int argc, char *argv[])
   // Steady state initialization
   for (UInt n = 0; n < nb_nodes; ++n)
   {
-    displacement(n, 0) = fss * -trac_top(1) / (shear_modulus)*position(n, 1);
+    displacement(n, 0) = fss * -trac_top(1) / (shear_modulus)*position(n, 1)*0.95;
     displacement(n, 1) = normal_strain_applied * position(n, 1);
   }
 
