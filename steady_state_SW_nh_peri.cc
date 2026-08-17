@@ -31,10 +31,10 @@ using namespace akantu;
 int main(int argc, char *argv[])
 {
 
-  if (argc != 4)
+  if (argc != 5)
   {
     std::cerr << "Usage: " << argv[0]
-              << " <coulomb-mu> <nb-it-nodes> <damping: n|s|l>" << std::endl;
+              << " <coulomb-mu> <nb-it-nodes> <damping: n|s|l><Coulomb-like>" << std::endl;
     return EXIT_FAILURE;
   }
 
@@ -43,13 +43,14 @@ int main(int argc, char *argv[])
   const Real coulomb_mus = std::stod(coulomb_mu_text);
   const UInt nb_it_nodes = std::stoul(argv[2]);
   const std::string damping_mode = argv[3];
+  const std::string is_coulomb = argv[4];
   initialize(input_file, argc, argv);
   const ParserSection &data = getUserParser();
 
   const auto &comm = Communicator::getStaticCommunicator();
   auto prank = comm.whoAmI();
   std::string output_folder =
-      "SW_nh_peri_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode;
+      "SW_nh_peri_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode + "_" + is_coulomb;
   UInt spatial_dimension = data.getParameter("spatial_dimension");
   std::unique_ptr<Mesh> mesh;
   std::unique_ptr<SolidMechanicsModel> model;
@@ -189,7 +190,12 @@ int main(int argc, char *argv[])
 
   const Real mu_s = coulomb_mus; // keep static friction from argv[1]
   const Real mu_d = 0.1;
-  const Real d_c = 1e-6;
+  Real d_c = 1e-6;
+    if (is_coulomb == "y")
+  {
+    d_c = 0;
+  }
+
 
   auto &velo = model->getVelocity();
   auto &increment = model->getIncrement();
