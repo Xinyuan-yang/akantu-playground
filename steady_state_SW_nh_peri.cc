@@ -218,6 +218,14 @@ int main(int argc, char *argv[])
 
   auto contact = solver_ntn->getContact();
 
+  contact->setBaseName(output_folder + "_contact_interface");
+  contact->addDumpField("contact_pressure");
+
+  friction->setBaseName(output_folder + "_friction_interface");
+  friction->addDumpField("friction_traction");
+  friction->addDumpField("frictional_strength");
+
+
   // With velocity-controlled steady sliding, a stress-controlled nucleation
   // length is not finite. Use a geometric centered precrack instead.
   const Real left = mesh->getLowerBounds()(_x);
@@ -421,9 +429,12 @@ int main(int argc, char *argv[])
              << std::endl;
     if (s % dump_every == 0)
     {
-      model->dump();
+      const Real dump_time = (s + 1) * time_step;
+      model->dump(dump_time, s + 1);
+      contact->dump(dump_time, s + 1);
+      friction->dump(dump_time, s + 1);
       std::cout << "Step " << s << "\t\r" << std::flush;
-    }
+    } 
   }
   std::cout << "Simulation done." << std::endl;
   return EXIT_SUCCESS;
