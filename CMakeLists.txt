@@ -80,6 +80,7 @@ add_akantu_simulation(steady_state_SW_nh_vinit steady_state_SW_nh_vinit.cc)
 add_akantu_simulation(steady_state_SW_nh_pc steady_state_SW_nh_pc.cc)
 add_akantu_simulation(steady_state_TEST steady_state_TEST.cc)
 add_akantu_simulation(steady_state_SW_nh_peri steady_state_SW_nh_peri.cc)
+add_akantu_simulation(steady_state_SW_nh_trac steady_state_SW_nh_trac.cc)
 add_akantu_simulation(steady_state_coulomb_peri steady_state_coulomb_peri.cc)
 
 add_akantu_simulation(simple_shear_static simple_shear_static.cc)

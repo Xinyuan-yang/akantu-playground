@@ -1,4 +1,5 @@
-// Velocity boundary condition code //
+// Velocity boundary condition code.  Define AKANTU_TRACTION_DRIVEN in a
+// translation unit that includes this file to build the traction-driven form.
 // Takes into parameter the friction coefficient and the number of elements along the contact surface.
 #include <cmath>
 #include <cstdlib>
@@ -49,8 +50,13 @@ int main(int argc, char *argv[])
 
   const auto &comm = Communicator::getStaticCommunicator();
   auto prank = comm.whoAmI();
+#ifdef AKANTU_TRACTION_DRIVEN
+  std::string output_folder =
+      "SW_nh_trac_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode + "_" + is_coulomb;
+#else
   std::string output_folder =
       "SW_nh_peri_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode + "_" + is_coulomb;
+#endif
   UInt spatial_dimension = data.getParameter("spatial_dimension");
   std::unique_ptr<Mesh> mesh;
   std::unique_ptr<SolidMechanicsModel> model;
@@ -147,6 +153,17 @@ int main(int argc, char *argv[])
   Vector<Real> trac_top = data.getParameter("top_traction");
   Vector<Real> trac_bottom = data.getParameter("bot_traction");
 
+#ifdef AKANTU_TRACTION_DRIVEN
+  // At steady sliding the interface supports the residual strength
+  // tau = mu_k |sigma_n|.  The top and bottom shear tractions must be equal
+  // and opposite because their outward normals have opposite directions.
+  const Real residual_friction = 0.1;
+  const Real normal_pressure = std::abs(trac_top(_y));
+  const Real steady_shear_traction = residual_friction * normal_pressure + 1e6;
+  trac_top(_x) = steady_shear_traction;
+  trac_bottom(_x) = -steady_shear_traction;
+#endif
+
   model->setBaseName(output_folder);
   model->addDumpField("blocked_dofs");
   model->addDumpField("mass");
@@ -157,7 +174,9 @@ int main(int argc, char *argv[])
   model->addDumpFieldVector("external_force");
 
   // Static analytical solution
+#ifndef AKANTU_TRACTION_DRIVEN
   Real fss = 0.10;
+#endif
   Real E = mat.getParam("E");
   Real nu = mat.getParam("nu");
   Real shear_modulus = E / (2. * (1. + nu));
@@ -172,8 +191,14 @@ int main(int argc, char *argv[])
   // Steady state initialization
   for (UInt n = 0; n < nb_nodes; ++n)
   {
-    displacement(n, 0) = fss * -trac_top(1) / (shear_modulus)*position(n, 1)*0.95;
-    displacement(n, 1) = normal_strain_applied * position(n, 1);
+#ifdef AKANTU_TRACTION_DRIVEN
+    displacement(n, _x) =
+        steady_shear_traction / shear_modulus * position(n, _y);
+#else
+    displacement(n, _x) =
+        fss * -trac_top(_y) / shear_modulus * position(n, _y) * 0.95;
+#endif
+    displacement(n, _y) = normal_strain_applied * position(n, _y);
   }
 
   // Set boundary conditions for dynamic simulation
@@ -234,14 +259,15 @@ int main(int argc, char *argv[])
   const Real precrack_length = (right - left) / 20.;
   const Real precrack_half_length = 0.5 * precrack_length;
   UInt weak_zone_nodes = 0;
-
   for (Int n = 0; n < contact->getNbContactNodes(); ++n)
   {
     const Idx slave = contact->getSlaves()(n);
     if (std::abs(position(slave, _x) - x_mid) <= precrack_half_length)
     {
-      friction->setParam("mu_s", static_cast<UInt>(n),0);
-      friction->setParam("mu_k", static_cast<UInt>(n),0);
+      // setParam expects a mesh-node ID and maps it to its contact-array
+      // index internally. Passing n selects an unrelated contact node.
+      friction->setParam("mu_s", slave, mu_d);
+      friction->setParam("mu_k", slave, mu_d);
       if (mesh->isLocalOrMasterNode(slave))
       {
         ++weak_zone_nodes;
@@ -285,6 +311,7 @@ int main(int argc, char *argv[])
   UInt nb_steps = t_fin / time_step;
   UInt dump_every = nb_steps / 500;
 
+#ifndef AKANTU_TRACTION_DRIVEN
   // Smoothly introduce the imposed sliding velocity from rest.
   const Real ramp_time = 2. * 0.5 / cs;
   const Real pi = std::acos(-1.);
@@ -300,6 +327,7 @@ int main(int argc, char *argv[])
     }
     return 0.5 * (1. - std::cos(pi * t / ramp_time));
   };
+#endif
 
   std::cout << "Time step = " << time_step << std::endl;
   std::cout << "Number of steps = " << nb_steps << std::endl;
@@ -361,6 +389,7 @@ int main(int argc, char *argv[])
 
   for (UInt s = 0; s < nb_steps; ++s)
   {
+#ifndef AKANTU_TRACTION_DRIVEN
     // Apply velocity
     UInt nb_nodes = model->getFEEngine().getMesh().getNbNodes();
     Array<Real> &position = mesh->getNodes();
@@ -393,7 +422,7 @@ int main(int argc, char *argv[])
         }
       }
     }
-    
+
     Real disp_incr = current_shear_vel * time_step;
     
     for (UInt n = 0; n < nb_nodes; ++n)
@@ -411,6 +440,7 @@ int main(int argc, char *argv[])
         blocked(n, 0) = true;
       }
     }
+#endif
 
     model->solveStep(*solver_ntn, "explicit_lumped");
 
