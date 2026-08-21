@@ -35,7 +35,7 @@ int main(int argc, char *argv[])
   if (argc != 5)
   {
     std::cerr << "Usage: " << argv[0]
-              << " <coulomb-mu> <nb-it-nodes> <damping: n|s|l><Coulomb-like>" << std::endl;
+              << " <coulomb-mu> <nb-it-nodes> <damping: n|s|l> <Coulomb-like>" << std::endl;
     return EXIT_FAILURE;
   }
 
@@ -172,6 +172,7 @@ int main(int argc, char *argv[])
   model->addDumpFieldVector("displacement");
   model->addDumpFieldVector("internal_force");
   model->addDumpFieldVector("external_force");
+  model->addDumpField("stress");
 
   // Static analytical solution
 #ifndef AKANTU_TRACTION_DRIVEN
@@ -192,8 +193,9 @@ int main(int argc, char *argv[])
   for (UInt n = 0; n < nb_nodes; ++n)
   {
 #ifdef AKANTU_TRACTION_DRIVEN
-    displacement(n, _x) =
-        steady_shear_traction / shear_modulus * position(n, _y);
+    // Shear loading starts from zero, so do not initialize the body with the
+    // displacement field for the final shear traction.
+    displacement(n, _x) = 0.;
 #else
     displacement(n, _x) =
         fss * -trac_top(_y) / shear_modulus * position(n, _y) * 0.95;
@@ -202,8 +204,19 @@ int main(int argc, char *argv[])
   }
 
   // Set boundary conditions for dynamic simulation
+#ifdef AKANTU_TRACTION_DRIVEN
+  // Apply normal loading initially; add the shear traction progressively in
+  // the time loop below.
+  auto initial_trac_top = trac_top;
+  auto initial_trac_bottom = trac_bottom;
+  initial_trac_top(_x) = 0.;
+  initial_trac_bottom(_x) = 0.;
+  model->applyBC(BC::Neumann::FromTraction(initial_trac_top), "slider_top");
+  model->applyBC(BC::Neumann::FromTraction(initial_trac_bottom), "base_bottom");
+#else
   model->applyBC(BC::Neumann::FromTraction(trac_top), "slider_top");
   model->applyBC(BC::Neumann::FromTraction(trac_bottom), "base_bottom");
+#endif
 
   ///// Set to steady state
   const auto &slider_nodes =
@@ -311,8 +324,7 @@ int main(int argc, char *argv[])
   UInt nb_steps = t_fin / time_step;
   UInt dump_every = nb_steps / 500;
 
-#ifndef AKANTU_TRACTION_DRIVEN
-  // Smoothly introduce the imposed sliding velocity from rest.
+  // Smoothly introduce the prescribed loading from rest.
   const Real ramp_time = 2. * 0.5 / cs;
   const Real pi = std::acos(-1.);
   auto ramp_factor = [&](Real t)
@@ -327,6 +339,9 @@ int main(int argc, char *argv[])
     }
     return 0.5 * (1. - std::cos(pi * t / ramp_time));
   };
+
+#ifdef AKANTU_TRACTION_DRIVEN
+  Real previous_traction_ramp_factor = 0.;
 #endif
 
   std::cout << "Time step = " << time_step << std::endl;
@@ -389,7 +404,23 @@ int main(int argc, char *argv[])
 
   for (UInt s = 0; s < nb_steps; ++s)
   {
-#ifndef AKANTU_TRACTION_DRIVEN
+#ifdef AKANTU_TRACTION_DRIVEN
+    const Real traction_ramp_factor = ramp_factor(s * time_step);
+    const Real traction_ramp_increment =
+        traction_ramp_factor - previous_traction_ramp_factor;
+
+    // Neumann loads accumulate in the external-force vector, so add only the
+    // change in shear traction at each step.
+    Vector<Real> shear_traction_top(spatial_dimension);
+    Vector<Real> shear_traction_bottom(spatial_dimension);
+    shear_traction_top.setZero();
+    shear_traction_bottom.setZero();
+    shear_traction_top(_x) = traction_ramp_increment * trac_top(_x);
+    shear_traction_bottom(_x) = traction_ramp_increment * trac_bottom(_x);
+    model->applyBC(BC::Neumann::FromTraction(shear_traction_top), "slider_top");
+    model->applyBC(BC::Neumann::FromTraction(shear_traction_bottom), "base_bottom");
+    previous_traction_ramp_factor = traction_ramp_factor;
+#else
     // Apply velocity
     UInt nb_nodes = model->getFEEngine().getMesh().getNbNodes();
     Array<Real> &position = mesh->getNodes();

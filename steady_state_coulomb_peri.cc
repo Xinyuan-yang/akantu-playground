@@ -7,6 +7,7 @@
 #include <limits>
 #include <memory>
 #include <ostream>
+#include <sstream>
 #include <string>
 
 #include "dumpable_iohelper.hh"
@@ -31,25 +32,18 @@ using namespace akantu;
 int main(int argc, char *argv[])
 {
 
-  if (argc != 4)
-  {
-    std::cerr << "Usage: " << argv[0]
-              << " <coulomb-mu> <nb-it-nodes> <damping: n|s|l><Coulomb-like>" << std::endl;
-    return EXIT_FAILURE;
-  }
-
+  // Parse Akantu options first, so --aka_input_file can replace the default
+  // without being mistaken for a positional simulation argument.
   const std::string input_file = "ras_ss_coulomb.in";
-  const std::string coulomb_mu_text = argv[1];
-  const Real coulomb_mu = std::stod(coulomb_mu_text);
-  const UInt nb_it_nodes = std::stoul(argv[2]);
-  const std::string damping_mode = argv[3];
   initialize(input_file, argc, argv);
+
   const ParserSection &data = getUserParser();
+  const UInt nb_it_nodes = data.getParameter("nb_it_nodes");
+  const std::string damping_mode = data.getParameter("damping_mode");
+  const std::string output_prefix = data.getParameter("output_prefix");
 
   const auto &comm = Communicator::getStaticCommunicator();
   auto prank = comm.whoAmI();
-  std::string output_folder =
-      "Coulomb_peri_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode + "_";
   UInt spatial_dimension = data.getParameter("spatial_dimension");
   std::unique_ptr<Mesh> mesh;
   std::unique_ptr<SolidMechanicsModel> model;
@@ -134,6 +128,14 @@ int main(int argc, char *argv[])
       *model, "slider_bottom", "base_top", normal_dir, time_step_factor);
   solver_ntn->getContact()->initParallel();
 
+  // The Coulomb coefficient is part of the friction-law section in the input
+  // file.  Keep it in the output name without requiring a command-line copy.
+  const Real coulomb_mu = solver_ntn->getFriction()->get("mu");
+  std::ostringstream output_name;
+  output_name << "Coulomb_peri_" << coulomb_mu << "_" << nb_it_nodes << "_"
+              << damping_mode << "_" << output_prefix;
+  const std::string output_folder = output_name.str();
+
   const auto &mat = model->getMaterial("slider");
 
   Real cp = mat.getPushWaveSpeed(ElementNull);
@@ -156,7 +158,7 @@ int main(int argc, char *argv[])
   model->addDumpFieldVector("external_force");
 
   // Static analytical solution
-  Real fss = 0.10;
+  const Real fss = data.getParameter("fss");
   Real E = mat.getParam("E");
   Real nu = mat.getParam("nu");
   Real shear_modulus = E / (2. * (1. + nu));
@@ -223,13 +225,14 @@ int main(int argc, char *argv[])
   const Real precrack_length = (right - left) / 20.;
   const Real precrack_half_length = 0.5 * precrack_length;
   UInt weak_zone_nodes = 0;
-
   for (Int n = 0; n < contact->getNbContactNodes(); ++n)
   {
     const Idx slave = contact->getSlaves()(n);
     if (std::abs(position(slave, _x) - x_mid) <= precrack_half_length)
     {
-      friction->setParam("mu", static_cast<UInt>(n),0);
+      // setParam expects a mesh-node ID and maps it to its contact-array
+      // index internally. Passing n selects an unrelated contact node.
+      friction->setParam("mu", slave, 0);
       if (mesh->isLocalOrMasterNode(slave))
       {
         ++weak_zone_nodes;

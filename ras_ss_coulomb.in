@@ -3,12 +3,13 @@ user parameters [
      top_traction  = [ 0.0e+06 , -1e7 ]
      bot_traction  = [ -0.0e+06 ,  1e7 ]
      shear_velocity = 3e-1
+     fss = 0.10
 
-     mesh = "ntn_test_ras.msh"
      spatial_dimension = 2
-     output_folder = "steady_state_coulomb"
 
      nb_it_nodes = 200
+     damping_mode = n
+     output_prefix = NS
      noise_file = noise_field_200.dat
      pos_file = pos_field_200.dat
      perturbation_amplitude = 0.2
@@ -20,20 +21,21 @@ user parameters [
 ]
 
 friction coulomb [
+     mu = 0.2
 ]
 
 material elastic [
      name = slider
-     rho  = 1200
-     nu   = 0.33
-     E    = 7.98e9
+     rho  = 3000
+     nu   = 0.25
+     E    = 27.74e9
      Plane_Stress = 1
 ]
 
 material elastic [
      name = base
-     rho  = 1200
-     nu   = 0.33
-     E    = 7.98e9
+     rho  = 2500
+     nu   = 0.25
+     E    = 8e9
      Plane_Stress = 1
 ]
