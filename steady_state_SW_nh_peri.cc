@@ -1,6 +1,4 @@
-// Velocity boundary condition code.  Define AKANTU_TRACTION_DRIVEN in a
-// translation unit that includes this file to build the traction-driven form.
-// Takes into parameter the friction coefficient and the number of elements along the contact surface.
+// Velocity boundary condition code.
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -8,6 +6,7 @@
 #include <limits>
 #include <memory>
 #include <ostream>
+#include <sstream>
 #include <string>
 
 #include "dumpable_iohelper.hh"
@@ -32,31 +31,17 @@ using namespace akantu;
 int main(int argc, char *argv[])
 {
 
-  if (argc != 5)
-  {
-    std::cerr << "Usage: " << argv[0]
-              << " <coulomb-mu> <nb-it-nodes> <damping: n|s|l> <Coulomb-like>" << std::endl;
-    return EXIT_FAILURE;
-  }
-
+  // Parse Akantu options first, so --aka_input_file can replace the default.
   const std::string input_file = "ras_ss_swnh.in";
-  const std::string coulomb_mu_text = argv[1];
-  const Real coulomb_mus = std::stod(coulomb_mu_text);
-  const UInt nb_it_nodes = std::stoul(argv[2]);
-  const std::string damping_mode = argv[3];
-  const std::string is_coulomb = argv[4];
   initialize(input_file, argc, argv);
   const ParserSection &data = getUserParser();
+  const UInt nb_it_nodes = data.getParameter("nb_it_nodes");
+  const std::string damping_mode = data.getParameter("damping_mode");
+  const std::string output_prefix = data.getParameter("output_prefix");
+  const bool is_traction_driven = data.getParameter("is_traction_driven");
 
   const auto &comm = Communicator::getStaticCommunicator();
   auto prank = comm.whoAmI();
-#ifdef AKANTU_TRACTION_DRIVEN
-  std::string output_folder =
-      "SW_nh_trac_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode + "_" + is_coulomb;
-#else
-  std::string output_folder =
-      "SW_nh_peri_" + coulomb_mu_text + "_" + std::to_string(nb_it_nodes) + "_" + damping_mode + "_" + is_coulomb;
-#endif
   UInt spatial_dimension = data.getParameter("spatial_dimension");
   std::unique_ptr<Mesh> mesh;
   std::unique_ptr<SolidMechanicsModel> model;
@@ -141,6 +126,15 @@ int main(int argc, char *argv[])
       *model, "slider_bottom", "base_top", normal_dir, time_step_factor);
   solver_ntn->getContact()->initParallel();
 
+  auto friction = solver_ntn->getFriction();
+  const Real mu_s = friction->get("mu_s");
+  const Real mu_k = friction->get("mu_k");
+  std::ostringstream output_name;
+  output_name << "SW_nh_" << (is_traction_driven ? "trac_" : "peri_")
+              << mu_s << "_" << nb_it_nodes << "_" << damping_mode << "_"
+              << output_prefix;
+  const std::string output_folder = output_name.str();
+
   const auto &mat = model->getMaterial("slider");
 
   Real cp = mat.getPushWaveSpeed(ElementNull);
@@ -153,16 +147,16 @@ int main(int argc, char *argv[])
   Vector<Real> trac_top = data.getParameter("top_traction");
   Vector<Real> trac_bottom = data.getParameter("bot_traction");
 
-#ifdef AKANTU_TRACTION_DRIVEN
-  // At steady sliding the interface supports the residual strength
-  // tau = mu_k |sigma_n|.  The top and bottom shear tractions must be equal
-  // and opposite because their outward normals have opposite directions.
-  const Real residual_friction = 0.1;
-  const Real normal_pressure = std::abs(trac_top(_y));
-  const Real steady_shear_traction = residual_friction * normal_pressure + 1e6;
-  trac_top(_x) = steady_shear_traction;
-  trac_bottom(_x) = -steady_shear_traction;
-#endif
+  if (is_traction_driven)
+  {
+    // At steady sliding the interface supports tau = mu_k |sigma_n|. The top
+    // and bottom shear tractions are equal and opposite because their outward
+    // normals point in opposite directions.
+    const Real normal_pressure = std::abs(trac_top(_y));
+    const Real steady_shear_traction = mu_k * normal_pressure + 1e6;
+    trac_top(_x) = steady_shear_traction;
+    trac_bottom(_x) = -steady_shear_traction;
+  }
 
   model->setBaseName(output_folder);
   model->addDumpField("blocked_dofs");
@@ -172,12 +166,9 @@ int main(int argc, char *argv[])
   model->addDumpFieldVector("displacement");
   model->addDumpFieldVector("internal_force");
   model->addDumpFieldVector("external_force");
-  model->addDumpField("stress");
 
   // Static analytical solution
-#ifndef AKANTU_TRACTION_DRIVEN
-  Real fss = 0.10;
-#endif
+  const Real fss = data.getParameter("fss");
   Real E = mat.getParam("E");
   Real nu = mat.getParam("nu");
   Real shear_modulus = E / (2. * (1. + nu));
@@ -192,31 +183,30 @@ int main(int argc, char *argv[])
   // Steady state initialization
   for (UInt n = 0; n < nb_nodes; ++n)
   {
-#ifdef AKANTU_TRACTION_DRIVEN
-    // Shear loading starts from zero, so do not initialize the body with the
-    // displacement field for the final shear traction.
-    displacement(n, _x) = 0.;
-#else
-    displacement(n, _x) =
-        fss * -trac_top(_y) / shear_modulus * position(n, _y) * 0.95;
-#endif
+    // Shear loading starts from zero in traction-driven mode.
+    displacement(n, _x) = is_traction_driven
+                             ? 0.
+                             : fss * -trac_top(_y) / shear_modulus *
+                                   position(n, _y) * 0.95;
     displacement(n, _y) = normal_strain_applied * position(n, _y);
   }
 
   // Set boundary conditions for dynamic simulation
-#ifdef AKANTU_TRACTION_DRIVEN
-  // Apply normal loading initially; add the shear traction progressively in
-  // the time loop below.
-  auto initial_trac_top = trac_top;
-  auto initial_trac_bottom = trac_bottom;
-  initial_trac_top(_x) = 0.;
-  initial_trac_bottom(_x) = 0.;
-  model->applyBC(BC::Neumann::FromTraction(initial_trac_top), "slider_top");
-  model->applyBC(BC::Neumann::FromTraction(initial_trac_bottom), "base_bottom");
-#else
-  model->applyBC(BC::Neumann::FromTraction(trac_top), "slider_top");
-  model->applyBC(BC::Neumann::FromTraction(trac_bottom), "base_bottom");
-#endif
+  if (is_traction_driven)
+  {
+    // Apply normal loading initially; ramp the shear traction in the loop.
+    auto initial_trac_top = trac_top;
+    auto initial_trac_bottom = trac_bottom;
+    initial_trac_top(_x) = 0.;
+    initial_trac_bottom(_x) = 0.;
+    model->applyBC(BC::Neumann::FromTraction(initial_trac_top), "slider_top");
+    model->applyBC(BC::Neumann::FromTraction(initial_trac_bottom), "base_bottom");
+  }
+  else
+  {
+    model->applyBC(BC::Neumann::FromTraction(trac_top), "slider_top");
+    model->applyBC(BC::Neumann::FromTraction(trac_bottom), "base_bottom");
+  }
 
   ///// Set to steady state
   const auto &slider_nodes =
@@ -226,33 +216,20 @@ int main(int argc, char *argv[])
 
   // Specify initial nodal velocity
 
-  const Real mu_s = coulomb_mus; // keep static friction from argv[1]
-  const Real mu_d = 0.1;
-  Real d_c = 1e-6;
-    if (is_coulomb == "y")
-  {
-    d_c = 0;
-  }
-
-
   auto &velo = model->getVelocity();
   auto &increment = model->getIncrement();
-  auto friction = solver_ntn->getFriction();
-  friction->set("mu_s", mu_s);
-  friction->set("mu_k", mu_d);
-  friction->set("d_c", d_c);
   auto dt = model->getTimeStep();
 
-  for (auto n : slider_nodes)
-  {
-    velo(n, _x) = 0.5 * shear_vel;
-    increment(n, _x) = 0.5 * shear_vel * dt;
-  }
-  for (auto n : base_nodes)
-  {
-    velo(n, _x) = -0.5 * shear_vel;
-    increment(n, _x) = -0.5 * shear_vel * dt;
-  }
+  // for (auto n : slider_nodes)
+  // {
+  //   velo(n, _x) = 0.5 * shear_vel;
+  //   increment(n, _x) = 0.5 * shear_vel * dt;
+  // }
+  // for (auto n : base_nodes)
+  // {
+  //   velo(n, _x) = -0.5 * shear_vel;
+  //   increment(n, _x) = -0.5 * shear_vel * dt;
+  // }
 
   auto contact = solver_ntn->getContact();
 
@@ -279,8 +256,8 @@ int main(int argc, char *argv[])
     {
       // setParam expects a mesh-node ID and maps it to its contact-array
       // index internally. Passing n selects an unrelated contact node.
-      friction->setParam("mu_s", slave, mu_d);
-      friction->setParam("mu_k", slave, mu_d);
+      friction->setParam("mu_s", slave, mu_k);
+      friction->setParam("mu_k", slave, mu_k);
       if (mesh->isLocalOrMasterNode(slave))
       {
         ++weak_zone_nodes;
@@ -340,9 +317,7 @@ int main(int argc, char *argv[])
     return 0.5 * (1. - std::cos(pi * t / ramp_time));
   };
 
-#ifdef AKANTU_TRACTION_DRIVEN
   Real previous_traction_ramp_factor = 0.;
-#endif
 
   std::cout << "Time step = " << time_step << std::endl;
   std::cout << "Number of steps = " << nb_steps << std::endl;
@@ -404,74 +379,76 @@ int main(int argc, char *argv[])
 
   for (UInt s = 0; s < nb_steps; ++s)
   {
-#ifdef AKANTU_TRACTION_DRIVEN
-    const Real traction_ramp_factor = ramp_factor(s * time_step);
-    const Real traction_ramp_increment =
-        traction_ramp_factor - previous_traction_ramp_factor;
-
-    // Neumann loads accumulate in the external-force vector, so add only the
-    // change in shear traction at each step.
-    Vector<Real> shear_traction_top(spatial_dimension);
-    Vector<Real> shear_traction_bottom(spatial_dimension);
-    shear_traction_top.setZero();
-    shear_traction_bottom.setZero();
-    shear_traction_top(_x) = traction_ramp_increment * trac_top(_x);
-    shear_traction_bottom(_x) = traction_ramp_increment * trac_bottom(_x);
-    model->applyBC(BC::Neumann::FromTraction(shear_traction_top), "slider_top");
-    model->applyBC(BC::Neumann::FromTraction(shear_traction_bottom), "base_bottom");
-    previous_traction_ramp_factor = traction_ramp_factor;
-#else
-    // Apply velocity
-    UInt nb_nodes = model->getFEEngine().getMesh().getNbNodes();
-    Array<Real> &position = mesh->getNodes();
-    Array<Real> &velo = model->getVelocity();
-    const Vector<Real> &upperBounds = mesh->getUpperBounds();
-    const Vector<Real> &lowerBounds = mesh->getLowerBounds();
-    Real top = upperBounds(1);
-    Real bottom = lowerBounds(1);
-    Array<Real> &displacement = model->getDisplacement();
-    Array<bool> &blocked = model->getBlockedDOFs();
-
-    Real t = s * time_step;
-    Real rf = ramp_factor(t);
-    Real current_shear_vel = rf * shear_vel;
-
-    for (UInt n = 0; n < nb_nodes; ++n)
+    if (is_traction_driven)
     {
-      if (std::abs(position(n, 1) - top) < 1e-6)
+      const Real traction_ramp_factor = ramp_factor(s * time_step);
+      const Real traction_ramp_increment =
+          traction_ramp_factor - previous_traction_ramp_factor;
+
+      // Neumann loads accumulate in external force, so add only the change.
+      Vector<Real> shear_traction_top(spatial_dimension);
+      Vector<Real> shear_traction_bottom(spatial_dimension);
+      shear_traction_top.setZero();
+      shear_traction_bottom.setZero();
+      shear_traction_top(_x) = traction_ramp_increment * trac_top(_x);
+      shear_traction_bottom(_x) = traction_ramp_increment * trac_bottom(_x);
+      model->applyBC(BC::Neumann::FromTraction(shear_traction_top), "slider_top");
+      model->applyBC(BC::Neumann::FromTraction(shear_traction_bottom), "base_bottom");
+      previous_traction_ramp_factor = traction_ramp_factor;
+    }
+    else
+    {
+      // Apply velocity.
+      UInt nb_nodes = model->getFEEngine().getMesh().getNbNodes();
+      Array<Real> &position = mesh->getNodes();
+      Array<Real> &velo = model->getVelocity();
+      const Vector<Real> &upperBounds = mesh->getUpperBounds();
+      const Vector<Real> &lowerBounds = mesh->getLowerBounds();
+      Real top = upperBounds(1);
+      Real bottom = lowerBounds(1);
+      Array<Real> &displacement = model->getDisplacement();
+      Array<bool> &blocked = model->getBlockedDOFs();
+
+      Real t = s * time_step;
+      Real rf = ramp_factor(t);
+      Real current_shear_vel = rf * shear_vel;
+
+      for (UInt n = 0; n < nb_nodes; ++n)
       {
-        for (UInt d = 0; d < spatial_dimension; ++d)
+        if (std::abs(position(n, 1) - top) < 1e-6)
         {
-          velo(n, _x) = 0.5 * current_shear_vel;
+          for (UInt d = 0; d < spatial_dimension; ++d)
+          {
+            velo(n, _x) = 0.5 * current_shear_vel;
+          }
+        }
+        if (std::abs(position(n, 1) - bottom) < 1e-6)
+        {
+          for (UInt d = 0; d < spatial_dimension; ++d)
+          {
+            velo(n, _x) = -0.5 * current_shear_vel;
+          }
         }
       }
-      if (std::abs(position(n, 1) - bottom) < 1e-6)
+
+      Real disp_incr = current_shear_vel * time_step;
+
+      for (UInt n = 0; n < nb_nodes; ++n)
       {
-        for (UInt d = 0; d < spatial_dimension; ++d)
+        if (std::abs(position(n, 1) - top) < 1e-6)
         {
-          velo(n, _x) = -0.5 * current_shear_vel;
+          displacement(n, 0) += 0.5 * disp_incr;
+          increment(n, _x) += 0.5 * disp_incr;
+          blocked(n, 0) = true;
+        }
+        if (std::abs(position(n, 1) - bottom) < 1e-6)
+        {
+          displacement(n, 0) += -0.5 * disp_incr;
+          increment(n, _x) += -0.5 * disp_incr;
+          blocked(n, 0) = true;
         }
       }
     }
-
-    Real disp_incr = current_shear_vel * time_step;
-    
-    for (UInt n = 0; n < nb_nodes; ++n)
-    {
-      if (std::abs(position(n, 1) - top) < 1e-6)
-      {
-        displacement(n, 0) += 0.5 * disp_incr;
-        increment(n, _x) += 0.5 * disp_incr;
-        blocked(n, 0) = true;
-      }
-      if (std::abs(position(n, 1) - bottom) < 1e-6)
-      {
-        displacement(n, 0) += -0.5 * disp_incr;
-        increment(n, _x) += -0.5 * disp_incr;
-        blocked(n, 0) = true;
-      }
-    }
-#endif
 
     model->solveStep(*solver_ntn, "explicit_lumped");
 
