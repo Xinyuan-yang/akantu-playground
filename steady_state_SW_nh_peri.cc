@@ -129,6 +129,7 @@ int main(int argc, char *argv[])
   auto friction = solver_ntn->getFriction();
   const Real mu_s = friction->get("mu_s");
   const Real mu_k = friction->get("mu_k");
+  const Real d_c = friction->get("d_c");
   std::ostringstream output_name;
   output_name << "SW_nh_" << (is_traction_driven ? "trac_" : "peri_")
               << mu_s << "_" << nb_it_nodes << "_" << damping_mode << "_"
@@ -136,6 +137,15 @@ int main(int argc, char *argv[])
   const std::string output_folder = output_name.str();
 
   const auto &mat = model->getMaterial("slider");
+  const Real E = mat.getParam("E");
+  const Real nu = mat.getParam("nu");
+  const Real shear_modulus = E / (2. * (1. + nu));
+  const Real effective_mode_ii_modulus = shear_modulus / (1. - nu);
+  const Real left = mesh->getLowerBounds()(_x);
+  const Real right = mesh->getUpperBounds()(_x);
+  const Real x_mid = 0.5 * (left + right);
+  const Real precrack_length = (right - left) / 20.;
+  const Real precrack_half_length = 0.5 * precrack_length;
 
   Real cp = mat.getPushWaveSpeed(ElementNull);
   Real cs = mat.getShearWaveSpeed(ElementNull);
@@ -149,11 +159,22 @@ int main(int argc, char *argv[])
 
   if (is_traction_driven)
   {
-    // At steady sliding the interface supports tau = mu_k |sigma_n|. The top
-    // and bottom shear tractions are equal and opposite because their outward
-    // normals point in opposite directions.
+    // Choose the shear traction so the centered weak zone is 1.1 G_l.
     const Real normal_pressure = std::abs(trac_top(_y));
-    const Real steady_shear_traction = mu_k * normal_pressure + 1e6;
+    const Real strength_drop = (mu_s - mu_k) * normal_pressure;
+    const Real target_G_l = precrack_length / 1.1;
+    if (strength_drop <= 0. || d_c <= 0. || target_G_l <= 0.)
+    {
+      std::cerr << "Cannot set traction from G_l: require mu_s > mu_k, "
+                   "d_c > 0, and a nonzero precrack length."
+                << std::endl;
+      return EXIT_FAILURE;
+    }
+    const Real driving_stress = std::sqrt(
+        effective_mode_ii_modulus * strength_drop * d_c /
+        (std::acos(-1.) * target_G_l));
+    const Real steady_shear_traction =
+        mu_k * normal_pressure + driving_stress;
     trac_top(_x) = steady_shear_traction;
     trac_bottom(_x) = -steady_shear_traction;
   }
@@ -169,10 +190,40 @@ int main(int argc, char *argv[])
 
   // Static analytical solution
   const Real fss = data.getParameter("fss");
-  Real E = mat.getParam("E");
-  Real nu = mat.getParam("nu");
-  Real shear_modulus = E / (2. * (1. + nu));
   Real normal_strain_applied = trac_top(1) / E - nu * nu * trac_top(1) / E;
+
+  if (is_traction_driven)
+  {
+    // Static mode-II estimates for a linear slip-weakening interface.
+    // G_l is the Griffith crack length and l_pz the zero-speed process-zone
+    // size. They use the effective mode-II modulus mu / (1 - nu).
+    const Real normal_pressure = std::abs(trac_top(_y));
+    const Real tau_peak = mu_s * normal_pressure;
+    const Real tau_residual = mu_k * normal_pressure;
+    const Real tau_initial = std::abs(trac_top(_x));
+    const Real strength_drop = tau_peak - tau_residual;
+    const Real driving_stress = tau_initial - tau_residual;
+    if (strength_drop > 0. && driving_stress > 0. && d_c > 0.)
+    {
+      const Real G_l = effective_mode_ii_modulus * strength_drop * d_c /
+                       (std::acos(-1.) * driving_stress * driving_stress);
+      const Real l_pz = 9. * std::acos(-1.) / 32. *
+                        effective_mode_ii_modulus * d_c / strength_drop;
+      if (prank == 0)
+      {
+        std::cout << "Traction-driven fracture scales: G_l = " << G_l
+                  << ", l_pz = " << l_pz
+                  << ", weak-zone / G_l = " << precrack_length / G_l
+                  << std::endl;
+      }
+    }
+    else if (prank == 0)
+    {
+      std::cerr << "Cannot calculate G_l and l_pz: require mu_s > mu_k, "
+                   "d_c > 0, and tau_initial > tau_residual."
+                << std::endl;
+    }
+  }
 
   Array<Real> &displacement = model->getDisplacement();
   Array<Real> &position = mesh->getNodes();
@@ -241,13 +292,8 @@ int main(int argc, char *argv[])
   friction->addDumpField("frictional_strength");
 
 
-  // With velocity-controlled steady sliding, a stress-controlled nucleation
-  // length is not finite. Use a geometric centered precrack instead.
-  const Real left = mesh->getLowerBounds()(_x);
-  const Real right = mesh->getUpperBounds()(_x);
-  const Real x_mid = 0.5 * (left + right);
-  const Real precrack_length = (right - left) / 20.;
-  const Real precrack_half_length = 0.5 * precrack_length;
+  // The centered weak zone is a geometric precrack in velocity-driven mode;
+  // traction-driven loading selects its stress so it is 1.1 G_l.
   UInt weak_zone_nodes = 0;
   for (Int n = 0; n < contact->getNbContactNodes(); ++n)
   {
