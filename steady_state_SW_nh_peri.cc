@@ -140,7 +140,7 @@ int main(int argc, char *argv[])
   const Real E = mat.getParam("E");
   const Real nu = mat.getParam("nu");
   const Real shear_modulus = E / (2. * (1. + nu));
-  const Real effective_mode_ii_modulus = shear_modulus / (1. - nu);
+  const Real effective_mode_ii_modulus = E;  // for plane stress
   const Real left = mesh->getLowerBounds()(_x);
   const Real right = mesh->getUpperBounds()(_x);
   const Real x_mid = 0.5 * (left + right);
@@ -213,7 +213,7 @@ int main(int argc, char *argv[])
       {
         std::cout << "Traction-driven fracture scales: G_l = " << G_l
                   << ", l_pz = " << l_pz
-                  << ", weak-zone / G_l = " << precrack_length / G_l
+                  << ", driving stress = " << driving_stress
                   << std::endl;
       }
     }
