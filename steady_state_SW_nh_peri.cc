@@ -162,7 +162,7 @@ int main(int argc, char *argv[])
     // Choose the shear traction so the centered weak zone is 1.1 G_l.
     const Real normal_pressure = std::abs(trac_top(_y));
     const Real strength_drop = (mu_s - mu_k) * normal_pressure;
-    const Real target_G_l = precrack_length / 1.1;
+    const Real target_G_l = precrack_length ;
     if (strength_drop <= 0. || d_c <= 0. || target_G_l <= 0.)
     {
       std::cerr << "Cannot set traction from G_l: require mu_s > mu_k, "
@@ -172,7 +172,7 @@ int main(int argc, char *argv[])
     }
     const Real driving_stress = std::sqrt(
         effective_mode_ii_modulus * strength_drop * d_c /
-        (std::acos(-1.) * target_G_l));
+        (std::acos(-1.) * target_G_l)) ;
     const Real steady_shear_traction =
         mu_k * normal_pressure + driving_stress;
     trac_top(_x) = steady_shear_traction;
@@ -229,7 +229,7 @@ int main(int argc, char *argv[])
   Array<Real> &position = mesh->getNodes();
   UInt nb_nodes = model->getFEEngine().getMesh().getNbNodes();
 
-  Real t_fin = 0.5 / cs * 5;
+  Real t_fin = 0.5 / cs * 25;
 
   // Steady state initialization
   for (UInt n = 0; n < nb_nodes; ++n)
@@ -348,7 +348,7 @@ int main(int argc, char *argv[])
   UInt dump_every = nb_steps / 500;
 
   // Smoothly introduce the prescribed loading from rest.
-  const Real ramp_time = 2. * 0.5 / cs;
+  const Real ramp_time = 20 * 0.5 / cs;
   const Real pi = std::acos(-1.);
   auto ramp_factor = [&](Real t)
   {
