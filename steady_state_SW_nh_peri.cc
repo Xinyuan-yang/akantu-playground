@@ -144,7 +144,7 @@ int main(int argc, char *argv[])
   const Real left = mesh->getLowerBounds()(_x);
   const Real right = mesh->getUpperBounds()(_x);
   const Real x_mid = 0.5 * (left + right);
-  const Real precrack_length = (right - left) / 20.;
+  const Real precrack_length = (right - left) / 10.;
   const Real precrack_half_length = 0.5 * precrack_length;
 
   Real cp = mat.getPushWaveSpeed(ElementNull);
@@ -152,7 +152,7 @@ int main(int argc, char *argv[])
 
   std::cout << "P-wave speed = " << cp << std::endl;
   std::cout << "S-wave speed = " << cs << std::endl;
-
+       
   Real shear_vel = data.getParameter("shear_velocity");
   Vector<Real> trac_top = data.getParameter("top_traction");
   Vector<Real> trac_bottom = data.getParameter("bot_traction");
@@ -315,7 +315,7 @@ int main(int argc, char *argv[])
   if (prank == 0)
   {
     std::cout << "Centered weak zone: length = " << precrack_length
-              << " (L / 20), nodes = " << weak_zone_nodes << std::endl;
+              << " (L / 10), nodes = " << weak_zone_nodes << std::endl;
   }
   velo.zero();
   increment.zero();
