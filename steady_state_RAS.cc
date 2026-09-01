@@ -4,7 +4,9 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <memory>
+#include <sstream>
 #include <string>
 
 #include "dumpable_iohelper.hh"
@@ -14,6 +16,7 @@
 #include "sparse_matrix.hh"
 
 #include "aka_common.hh"
+#include "mesh_partition_mesh_data.hh"
 #include "mesh_utils.hh"
 #include "ntn_base_contact.hh"
 #include "ntn_contact_solvercallback.hh"
@@ -27,20 +30,66 @@ int main(int argc, char *argv[]) {
 
   const UInt spatial_dimension = data.getParameter("spatial_dimension");
   const std::string mesh_file = data.getParameter("mesh");
-  const std::string output_folder = data.getParameter("output_folder");
+  const UInt nb_it_nodes = data.getParameter("nb_it_nodes");
+  const std::string damping_mode = data.getParameter("damping_mode");
+  const std::string output_prefix = data.getParameter("output_prefix");
   const bool is_traction_driven = data.getParameter("is_traction_driven");
-  const UInt nb_steps = data.getParameter("nb_steps");
-  const UInt dump_every =
-      std::max<UInt>(1, data.getParameter("dump_every"));
   const Real time_step_factor = data.getParameter("time_step_factor");
   const Real shear_velocity = data.getParameter("shear_velocity");
 
+  const auto &comm = Communicator::getStaticCommunicator();
+  auto prank = comm.whoAmI();
+  const Int psize = comm.getNbProc();
   Mesh mesh(spatial_dimension);
-  mesh.read(mesh_file);
-  // Initialise mesh synchronizers before initialising the contact's parallel
-  // data.  A null partition is the serial distribution and is also required
-  // for a one-rank run.
+  if (prank == 0)
+  {
+    mesh.read(mesh_file);
+  }
+
+  // Build the same x-strip partition used by steady_state_SW_nh_peri.  Only
+  // rank zero owns the complete mesh before distribute() is called.
   std::shared_ptr<MeshPartition> partition;
+  if (psize > 1 && prank == 0) {
+    auto partition_mapping =
+        std::make_shared<ElementTypeMapArray<Idx>>("x_strip_partition");
+
+    Real xmin = std::numeric_limits<Real>::max();
+    Real xmax = -std::numeric_limits<Real>::max();
+    for (const auto &type :
+         mesh.elementTypes(spatial_dimension, _not_ghost, _ek_not_defined)) {
+      const auto nb_element = mesh.getNbElement(type);
+      for (Idx e = 0; e < nb_element; ++e) {
+        const Element element{type, e, _not_ghost};
+        const auto barycenter = mesh.getBarycenter(element);
+        xmin = std::min(xmin, barycenter(_x));
+        xmax = std::max(xmax, barycenter(_x));
+      }
+    }
+
+    const Real length = xmax - xmin;
+    for (const auto &type :
+         mesh.elementTypes(spatial_dimension, _not_ghost, _ek_not_defined)) {
+      const auto nb_element = mesh.getNbElement(type);
+      auto &type_partition =
+          partition_mapping->alloc(nb_element, 1, type, _not_ghost);
+      for (Idx e = 0; e < nb_element; ++e) {
+        const Element element{type, e, _not_ghost};
+        const auto barycenter = mesh.getBarycenter(element);
+        Int proc = 0;
+        if (length > 0.) {
+          const Real x_rel = (barycenter(_x) - xmin) / length;
+          proc = std::min<Int>(psize - 1, std::floor(x_rel * psize));
+        }
+        type_partition(e) = proc;
+      }
+    }
+
+    auto mesh_data_partition =
+        std::make_shared<MeshPartitionMeshData>(mesh, spatial_dimension);
+    mesh_data_partition->setPartitionMapping(partition_mapping);
+    mesh_data_partition->partitionate(psize);
+    partition = mesh_data_partition;
+  }
   mesh.distribute(partition);
   mesh.makePeriodic(_x, "slider_left", "slider_right");
   mesh.makePeriodic(_x, "base_left", "base_right");
@@ -58,6 +107,11 @@ int main(int argc, char *argv[]) {
   const Real nu = mat.getParam("nu");
   const Real shear_modulus = E / (2. * (1. + nu));
   const Real fss = data.getParameter("fss");
+  std::ostringstream output_name;
+  output_name << "RAS_" << (is_traction_driven ? "trac_" : "peri_")
+              << std::trunc(fss * 100.0) / 100.0 << "_" << nb_it_nodes << "_" << damping_mode << "_"
+              << output_prefix;
+  const std::string output_folder = output_name.str();
   Vector<Real> traction_top = data.getParameter("top_traction");
   Vector<Real> traction_bottom = data.getParameter("bot_traction");
   if (is_traction_driven) {
@@ -89,6 +143,9 @@ int main(int argc, char *argv[]) {
                                    position(n, _y);
     displacement(n, _y) = normal_strain * position(n, _y);
   }
+
+  Real t_fin = 0.5 / cs * 25;
+
 
   if (is_traction_driven) {
     auto initial_traction_top = traction_top;
@@ -132,7 +189,10 @@ int main(int argc, char *argv[]) {
   const Real stable_time_step = model.getStableTimeStep();
   const Real time_step = stable_time_step * time_step_factor;
   model.setTimeStep(time_step);
-  const Real ramp_time = 2. * 0.5 / cs;
+  UInt nb_steps = t_fin / time_step;
+  UInt dump_every = nb_steps / 500;
+
+  const Real ramp_time = 20 * 0.5 / cs;
   const Real pi = std::acos(-1.);
   auto ramp_factor = [&](Real time) {
     if (time <= 0.) return 0.;
@@ -146,21 +206,46 @@ int main(int argc, char *argv[]) {
   model.assembleStiffnessMatrix(true);
   auto &K = model.getDOFManager().getMatrix("K");
   auto &C = model.getDOFManager().getNewMatrix("C", "K");
+  Real alpha = 0.;
+  Real beta = 0.;
+  if (damping_mode == "n") {
+    alpha = 0.;
+    beta = 0.;
+  } else if (damping_mode == "s") {
+    alpha = 40.;
+    beta = 1e-10;
+  } else if (damping_mode == "l") {
+    alpha = 40.;
+    beta = 5e-9;
+  } else {
+    if (prank == 0) {
+      std::cerr << "Unknown damping mode '" << damping_mode
+                << "'. Use n, s, or l." << std::endl;
+    }
+    return EXIT_FAILURE;
+  }
   C.zero();
-  C.add(M, 0.);
-  C.add(K, 0.);
+  C.add(M, alpha);
+  C.add(K, beta);
 
-  std::ofstream energies("friction-energies-" + output_folder + ".csv",
-                         std::ofstream::out | std::ofstream::trunc);
-  energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
+  std::ofstream energies;
+  if (prank == 0) {
+    energies.open("friction-energies-" + output_folder + ".csv",
+                  std::ofstream::out | std::ofstream::trunc);
+    energies << "time,ekin,epot,work,econ,efri,tot" << std::endl;
+  }
   Real initial_energy = 0.;
   Real external_work = 0.;
   const Real top = mesh.getUpperBounds()(_y);
   const Real bottom = mesh.getLowerBounds()(_y);
 
-  std::cout << "Time step = " << time_step << ", steps = " << nb_steps
-            << ", ramp time = " << ramp_time << ", dump every = "
-            << dump_every << std::endl;
+  if (prank == 0) {
+    std::cout << "Time step = " << time_step << ", steps = " << nb_steps
+              << ", ramp time = " << ramp_time << ", dump every = "
+              << dump_every << ", mesh = " << mesh_file
+              << ", damping mode = " << damping_mode << " (alpha = " << alpha
+              << ", beta = " << beta << ")" << std::endl;
+  }
   for (UInt step = 0; step < nb_steps; ++step) {
     if (is_traction_driven) {
       const Real traction_ramp = ramp_factor(step * time_step);
@@ -204,10 +289,12 @@ int main(int argc, char *argv[]) {
     const auto econ = solver_ntn.getExternalWork();
     if (step == 0)
       initial_energy = ekin + epot - (external_work + econ[0] + econ[1]);
-    energies << step * time_step << ',' << ekin << ',' << epot << ','
-             << external_work << ',' << econ[0] << ',' << econ[1] << ','
-             << ekin + epot - (external_work + econ[0] + econ[1]) - initial_energy
-             << std::endl;
+    if (prank == 0) {
+      energies << step * time_step << ',' << ekin << ',' << epot << ','
+               << external_work << ',' << econ[0] << ',' << econ[1] << ','
+               << ekin + epot - (external_work + econ[0] + econ[1]) - initial_energy
+               << std::endl;
+    }
     if (step % dump_every == 0) {
       const Real dump_time = (step + 1) * time_step;
       model.dump(dump_time, step + 1);
