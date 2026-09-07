@@ -143,6 +143,7 @@ int main(int argc, char *argv[])
   const Real effective_mode_ii_modulus = E;  // for plane stress
   const Real left = mesh->getLowerBounds()(_x);
   const Real right = mesh->getUpperBounds()(_x);
+  const Real L = right - left;
   const Real x_mid = 0.5 * (left + right);
   const Real precrack_length = (right - left) / 10.;
   const Real precrack_half_length = 0.5 * precrack_length;
@@ -172,7 +173,7 @@ int main(int argc, char *argv[])
     }
     const Real driving_stress = std::sqrt(
         effective_mode_ii_modulus * strength_drop * d_c /
-        (std::acos(-1.) * target_G_l)) ;
+        (std::acos(-1.) * target_G_l))  * 0.8;
     const Real steady_shear_traction =
         mu_k * normal_pressure + driving_stress;
     trac_top(_x) = steady_shear_traction;
@@ -229,7 +230,7 @@ int main(int argc, char *argv[])
   Array<Real> &position = mesh->getNodes();
   UInt nb_nodes = model->getFEEngine().getMesh().getNbNodes();
 
-  Real t_fin = 0.5 / cs * 25;
+  Real t_fin = L / cs * 30;
 
   // Steady state initialization
   for (UInt n = 0; n < nb_nodes; ++n)
@@ -238,7 +239,7 @@ int main(int argc, char *argv[])
     displacement(n, _x) = is_traction_driven
                              ? 0.
                              : fss * -trac_top(_y) / shear_modulus *
-                                   position(n, _y) * 0.95;
+                                   position(n, _y) * 0.98;
     displacement(n, _y) = normal_strain_applied * position(n, _y);
   }
 
@@ -348,7 +349,7 @@ int main(int argc, char *argv[])
   UInt dump_every = nb_steps / 500;
 
   // Smoothly introduce the prescribed loading from rest.
-  const Real ramp_time = 20 * 0.5 / cs;
+  const Real ramp_time = 20 * L / cs;
   const Real pi = std::acos(-1.);
   auto ramp_factor = [&](Real t)
   {
