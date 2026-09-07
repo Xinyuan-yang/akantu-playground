@@ -222,7 +222,7 @@ int main(int argc, char *argv[])
   const Real left = mesh->getLowerBounds()(_x);
   const Real right = mesh->getUpperBounds()(_x);
   const Real x_mid = 0.5 * (left + right);
-  const Real precrack_length = (right - left) / 20.;
+  const Real precrack_length = (right - left) / 10.;
   const Real precrack_half_length = 0.5 * precrack_length;
   UInt weak_zone_nodes = 0;
   for (Int n = 0; n < contact->getNbContactNodes(); ++n)
