@@ -168,7 +168,7 @@ int main(int argc, char *argv[])
   Array<Real> &position = mesh->getNodes();
   UInt nb_nodes = model->getFEEngine().getMesh().getNbNodes();
 
-  Real t_fin = 0.5 / cs * 5;
+
 
   // Steady state initialization
   for (UInt n = 0; n < nb_nodes; ++n)
@@ -221,6 +221,7 @@ int main(int argc, char *argv[])
   // length is not finite. Use a geometric centered precrack instead.
   const Real left = mesh->getLowerBounds()(_x);
   const Real right = mesh->getUpperBounds()(_x);
+  const Real L = right - left;
   const Real x_mid = 0.5 * (left + right);
   const Real precrack_length = (right - left) / 10.;
   const Real precrack_half_length = 0.5 * precrack_length;
@@ -273,11 +274,12 @@ int main(int argc, char *argv[])
   Real stable_time_step = model->getStableTimeStep();
   Real time_step = stable_time_step * time_step_factor;
   model->setTimeStep(time_step);
+  Real t_fin = L / cs * 30;
   UInt nb_steps = t_fin / time_step;
   UInt dump_every = nb_steps / 500;
 
   // Smoothly introduce the imposed sliding velocity from rest.
-  const Real ramp_time = 2. * 0.5 / cs;
+  const Real ramp_time = 20 * L / cs;
   const Real pi = std::acos(-1.);
   auto ramp_factor = [&](Real t)
   {
