@@ -331,7 +331,7 @@ int main(int argc, char *argv[])
   Real time_step = stable_time_step * time_step_factor;
   model->setTimeStep(time_step);
   UInt nb_steps = t_fin / time_step;
-  UInt dump_every = nb_steps / 500;
+  UInt dump_every = nb_steps / 1000;
 
   // Smoothly introduce the prescribed loading from rest.
   const Real ramp_time = 20 * L / cs;
