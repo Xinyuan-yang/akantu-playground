@@ -52,3 +52,12 @@ log/
 *.out
 *.err
 Check_consistency.ipynb
+
+#dockers
+*.opencode
+opencode.json
+pkg.txt
+README.md
+requirements.txt
+run.ps1
+run.sh
