@@ -44,7 +44,9 @@ int main(int argc, char *argv[])
   initialize(input_file, argc, argv);
   const ParserSection &data = getUserParser();
   const UInt nb_it_nodes = data.getParameter("nb_it_nodes");
-  const std::string damping_mode = data.getParameter("damping_mode");
+  const Real alpha = data.getParameter("alpha");
+  const Real beta = data.getParameter("beta");
+  const std::string damping_prefix = data.getParameter("damping_prefix");
   const std::string output_prefix = data.getParameter("output_prefix");
   const bool initial_bulk_velocity = data.getParameter("initial_bulk_velocity");
   const bool apply_initial_velocity_perturbation =
@@ -145,7 +147,7 @@ int main(int argc, char *argv[])
 
   std::ostringstream output_name;
   output_name << "SW_nh_bulk_" << mu_s << "_" << nb_it_nodes << "_"
-              << damping_mode << "_" << output_prefix;
+              << damping_prefix << "_" << output_prefix;
   const std::string output_folder = output_name.str();
 
   const auto &mat = model->getMaterial("slider");
@@ -201,7 +203,7 @@ int main(int argc, char *argv[])
       continue;
     }
 
-    displacement(n, _x) = lateral_strain_applied * (position(n, _x) - x_mid);;
+    displacement(n, _x) = lateral_strain_applied * (position(n, _x) - x_mid);
     displacement(n, _y) = normal_strain_applied * position(n, _y);
   }
   mesh->getNodeSynchronizer().synchronizeArray(displacement);
@@ -288,33 +290,8 @@ int main(int argc, char *argv[])
             << " contact nodes = " << solver_ntn->getContact()->getNbContactNodes()
             << std::endl;
 
-  Real alpha = 0; // mass proportional damping
-  Real beta = 0;  // stiffness proportional damping
-
-  if (damping_mode == "n")
-  {
-    alpha = 0;
-    beta = 0;
-  }
-  else if (damping_mode == "s")
-  {
-    alpha = 40;
-    beta = 1e-10;
-  }
-  else if (damping_mode == "l")
-  {
-    alpha = 40;
-    beta = 5e-9;
-  }
-  else
-  {
-    std::cerr << "Unknown damping mode '" << damping_mode
-              << "'. Use n, s, or l." << std::endl;
-    return EXIT_FAILURE;
-  }
-
-  std::cout << "Damping mode " << damping_mode << ": alpha = " << alpha
-            << ", beta = " << beta << std::endl;
+  std::cout << "Rayleigh damping: alpha = " << alpha << ", beta = " << beta
+            << std::endl;
 
   model->assembleMass();
   auto &M = model->getDOFManager().getMatrix("M");
