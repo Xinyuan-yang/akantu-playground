@@ -184,7 +184,6 @@ int main(int argc, char *argv[])
   // Plane stress with traction-free lateral boundaries: sigma_xx = 0.
   const Real fss = data.getParameter("fss");
   const Real normal_strain_applied = trac_top(1) / E;
-  const Real lateral_strain_applied = -nu * normal_strain_applied;
 
   Array<Real> &displacement = model->getDisplacement();
   Array<Real> &position = mesh->getNodes();
@@ -203,10 +202,14 @@ int main(int argc, char *argv[])
       continue;
     }
 
-    displacement(n, _x) = lateral_strain_applied * (position(n, _x) - x_mid);
+    displacement(n, _x) = fss * -trac_top(_y) / shear_modulus * position(n, _y) * 1.0;
     displacement(n, _y) = normal_strain_applied * position(n, _y);
   }
   mesh->getNodeSynchronizer().synchronizeArray(displacement);
+  if (mesh->isPeriodic())
+  {
+    mesh->makeConsistentForPeriodicity(displacement, ReduceOperation::_id);
+  }
 
   // Apply normal confining tractions on the top and bottom free surfaces.
   // These remain constant during the simulation (no follower-pressure update
@@ -285,6 +288,11 @@ int main(int argc, char *argv[])
 
   mesh->getNodeSynchronizer().synchronizeArray(velo);
   mesh->getNodeSynchronizer().synchronizeArray(increment);
+  if (mesh->isPeriodic())
+  {
+    mesh->makeConsistentForPeriodicity(velo, ReduceOperation::_id);
+    mesh->makeConsistentForPeriodicity(increment, ReduceOperation::_id);
+  }
 
   std::cout << "rank " << prank
             << " contact nodes = " << solver_ntn->getContact()->getNbContactNodes()
@@ -330,8 +338,6 @@ int main(int argc, char *argv[])
     Real bottom = lowerBounds(1);
     Array<Real> &displacement = model->getDisplacement();
     Array<bool> &blocked = model->getBlockedDOFs();
-
-
     for (UInt n = 0; n < nb_nodes; ++n)
     {
       if (not mesh->isLocalOrMasterNode(n))
@@ -360,13 +366,13 @@ int main(int argc, char *argv[])
       if (std::abs(position(n, 1) - top) < 1e-6)
       {
         displacement(n, 0) += 0.5 * disp_incr ;
-        increment(n, _x) += 0.5 * disp_incr ;
+        increment(n, _x) = 0.5 * disp_incr ;
         blocked(n, 0) = true;
       }
       if (std::abs(position(n, 1) - bottom) < 1e-6)
       {
         displacement(n, 0) += -0.5 * disp_incr ;
-        increment(n, _x) += -0.5 * disp_incr ;
+        increment(n, _x) = -0.5 * disp_incr ;
         blocked(n, 0) = true;
       }
     }
@@ -412,8 +418,19 @@ int main(int argc, char *argv[])
         velo(n, _x) += perturbation;
         increment(n, _x) += perturbation * time_step;
       }
+
       mesh->getNodeSynchronizer().synchronizeArray(velo);
       mesh->getNodeSynchronizer().synchronizeArray(increment);
+    }
+
+    // The driving loop updates periodic masters only. Copy prescribed values
+    // and the blocked-x flag to periodic slaves before contact is evaluated.
+    if (mesh->isPeriodic())
+    {
+      mesh->makeConsistentForPeriodicity(velo, ReduceOperation::_id);
+      mesh->makeConsistentForPeriodicity(displacement, ReduceOperation::_id);
+      mesh->makeConsistentForPeriodicity(increment, ReduceOperation::_id);
+      mesh->makeConsistentForPeriodicity(blocked, ReduceOperation::_or);
     }
 
     model->solveStep(*solver_ntn, "explicit_lumped");
@@ -445,4 +462,3 @@ int main(int argc, char *argv[])
   std::cout << "Simulation done." << std::endl;
   return EXIT_SUCCESS;
 }
-
